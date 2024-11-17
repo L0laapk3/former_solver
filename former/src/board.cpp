@@ -1,4 +1,6 @@
 #include "board.h"
+#include <bitset>
+#include <immintrin.h>
 #include <stdexcept>
 #include <iostream>
 #include <cassert>
@@ -20,12 +22,12 @@ Board Board::fromString(std::string_view str) {
 				} else if (*it == 'O') {
 
 				} else if (*it == 'P') {
-					board.type[0] |= bit;
+					board.types[0] |= bit;
 				} else if (*it == 'B') {
-					board.type[1] |= bit;
+					board.types[1] |= bit;
 				} else if (*it == 'G') {
-					board.type[0] |= bit;
-					board.type[1] |= bit;
+					board.types[0] |= bit;
+					board.types[1] |= bit;
 				} else {
 					++it;
 					continue;
@@ -43,14 +45,14 @@ std::string Board::toString() const {
 		for (size_t x = 0; x < WIDTH; x++) {
 			U64 bit = 1ULL << (x * HEIGHT + (HEIGHT - 1 - y));
 			if (occupied & bit) {
-				if (type[0] & bit) {
-					if (type[1] & bit) {
+				if (types[0] & bit) {
+					if (types[1] & bit) {
 						str += "\x1b[38;5;42mG";
 					} else {
 						str += "\x1b[38;5;201mP";
 					}
 				} else {
-					if (type[1] & bit) {
+					if (types[1] & bit) {
 						str += "\x1b[38;5;27mB";
 					} else {
 						str += "\x1b[38;5;208mO";
@@ -64,16 +66,25 @@ std::string Board::toString() const {
 	}
 	return str;
 }
+std::string Board::toBitString(U64 bits) {
+	std::string result = "0b" + std::bitset<1>(bits >> 63).to_string();
+	for (size_t i = 63; i > 0;) {
+		 i -= 9;
+		result += "'" + std::bitset<9>(bits >> i).to_string();
+	}
+	return result;
+}
+
 
 
 
 void Board::generateMoves(Board*& newBoards) const {
 	U64 moves = occupied;
 
-	U64 leftSame  = ~((type[0] << HEIGHT) ^ type[0]) & ~((type[1] << HEIGHT) ^ type[1]) & MASK_LEFT;
-	U64 rightSame = ~((type[0] >> HEIGHT) ^ type[0]) & ~((type[1] >> HEIGHT) ^ type[1]) & MASK_RIGHT;
-	U64 upSame    = ~((type[0] << 1) ^ type[0]) & ~((type[1] << 1) ^ type[1]) & MASK_UP;
-	U64 downSame  = ~((type[0] >> 1) ^ type[0]) & ~((type[1] >> 1) ^ type[1]) & MASK_DOWN;
+	U64 leftSame  = ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & MASK_LEFT;
+	U64 rightSame = ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & MASK_RIGHT;
+	U64 upSame    = ~((types[0] << 1) ^ types[0]) & ~((types[1] << 1) ^ types[1]) & MASK_UP;
+	U64 downSame  = ~((types[0] >> 1) ^ types[0]) & ~((types[1] >> 1) ^ types[1]) & MASK_DOWN;
 
 	Board* newBoardsBegin = newBoards;
 	while (moves) {
@@ -89,6 +100,22 @@ void Board::generateMoves(Board*& newBoards) const {
 		*newBoards = *this;
 		newBoards->occupied ^= move;
 		moves ^= move;
+
+		std::cout << "before gravity" << std::endl;
+		std::cout << newBoards->toString() << std::endl;
+
+		// apply gravity
+		for (auto& type : newBoards->types)
+			type = _pext_u64(type, newBoards->occupied);
+
+		newBoards->occupied = _pdep_u64(_pext_u64( MASK_COL_ODD, (newBoards->occupied &  MASK_COL_ODD) | ((~newBoards->occupied &  MASK_COL_ODD) << HEIGHT)),  MASK_COL_ODD)
+		                    | _pdep_u64(_pext_u64(~MASK_COL_ODD, (newBoards->occupied & ~MASK_COL_ODD) | ((~newBoards->occupied & ~MASK_COL_ODD) << HEIGHT)), ~MASK_COL_ODD);
+
+		for (auto& type : newBoards->types)
+			type = _pdep_u64(type, newBoards->occupied);
+
+		std::cout << "after gravity" << std::endl;
+		std::cout << newBoards->toString() << std::endl;
 
 		newBoards++;
 	}

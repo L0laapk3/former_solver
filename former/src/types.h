@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include "x86intrin.h"
+#include <immintrin.h>
+#include <xmmintrin.h>
 
 
 typedef std::uint8_t  U8;
