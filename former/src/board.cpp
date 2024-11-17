@@ -158,13 +158,17 @@ U64 Board::hash() const {
 std::unique_ptr<TT> tt;
 
 // minimum move count required to clear the board
-Score Board::eval() const {
-	Score score = 0;
-	if (~types[0] & ~types[1] & occupied) score++;
-	if ( types[0] & ~types[1]           ) score++;
-	if (~types[0] &  types[1]           ) score++;
-	if ( types[0] &  types[1]           ) score++;
-	return score;
+Score Board::movesLowerBound() const {
+	U64 counts = 0;
+	U64 color0Cols = toColumnMask(~types[0] & ~types[1] & occupied);
+	counts |= (color0Cols & ~(color0Cols << 1));
+	U64 color1Cols = toColumnMask( types[0] & ~types[1]);
+	counts |= (color1Cols & ~(color1Cols << 1)) << 1;
+	U64 color2Cols = toColumnMask(~types[0] &  types[1]);
+	counts |= (color2Cols & ~(color2Cols << 1)) << 2;
+	U64 color3Cols = toColumnMask( types[0] &  types[1]);
+	counts |= (color3Cols & ~(color3Cols << 1)) << 3;
+	return std::popcount(counts);
 }
 
 constexpr bool collectTTStats = true;
@@ -193,7 +197,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 			return { .score = 0 };
 	}
 
-	if (depth < eval()) {
+	if (depth < movesLowerBound()) {
 		if constexpr (!returnMove)
 			return { std::numeric_limits<Score>::max() - MAX_MOVES };
 		else

@@ -44,7 +44,7 @@ struct Board {
 	U64 hash() const;
 	static void logStats();
 
-	Score eval() const;
+	Score movesLowerBound() const;
 
 	U64 partialOrderReductionMask(U64 move, Board& newBoard) const;
 	void generateMoves(Move*& newMoves, U64 moveMask = ~0ULL) const;
