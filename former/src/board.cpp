@@ -88,7 +88,7 @@ U64 Board::toColumnMask(U64 bits) {
 	U64 addShit = (bits & ~MASK_TOP) + ~MASK_TOP;
 	U64 colLsb = ((addShit | bits) >> (HEIGHT - 1)) & MASK_BOTTOM;
 	// This multiplication could be replaced with a subtraction and some masking/oring?
-	return (colLsb & MASK_BOTTOM) * MASK_LEFT;
+	return colLsb * MASK_LEFT;
 }
 
 
@@ -97,7 +97,8 @@ U64 Board::partialOrderReductionMask(U64 move, Board& newBoard) const {
 	return ~0ULL << (_tzcnt_u64(move >> HEIGHT) / HEIGHT * HEIGHT);
 }
 
-void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
+template<typename Callable>
+void Board::generateMoves(U64 moveMask, Callable cb) const {
 	U64 moves = occupied & moveMask;
 
 	U64 leftSame  = ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
@@ -105,9 +106,7 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 	U64 upSame    = ~((types[0] << 1) ^ types[0]) & ~((types[1] << 1) ^ types[1]) & ~MASK_BOTTOM;
 	U64 downSame  = ~((types[0] >> 1) ^ types[0]) & ~((types[1] >> 1) ^ types[1]) & ~MASK_TOP;
 
-	Move* newMovesBegin = newMoves;
 	while (moves) {
-		assert(newMoves != newMovesBegin + MAX_MOVES);
 		U64 move = moves & -moves;
 		U64 lastMove;
 		do {
@@ -138,12 +137,8 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 		// std::cout << "after gravity" << std::endl;
 		// std::cout << newBoard.toString() << std::endl;
 
-		*newMoves = {
-			.board = newBoard,
-			.moveMask = partialOrderReductionMask(move, newBoard),
-		};
-
-		newMoves++;
+		if (cb(newBoard, partialOrderReductionMask(move, newBoard)))
+			return;
 	}
 }
 
@@ -189,19 +184,19 @@ void Board::logStats() {
 		std::cout << "nodes: " << nodes << std::endl;
 }
 
-template<bool returnMove>
-std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask) const {
+template<bool rootSearch>
+std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Depth depth, U64 moveMask) const {
 	if constexpr (countNodes)
 		nodes++;
 	if (occupied == 0) {
-		if constexpr (!returnMove)
+		if constexpr (!rootSearch)
 			return { 0 };
 		else
 			return { .score = 0 };
 	}
 
 	if (depth < movesLowerBound()) {
-		if constexpr (!returnMove)
+		if constexpr (!rootSearch)
 			return { std::numeric_limits<Score>::max() - MAX_MOVES };
 		else
 			return { .score = std::numeric_limits<Score>::max() - MAX_MOVES };
@@ -209,7 +204,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 
 	// TT lookup
 	TTEntry* entry;
-	if (depth > TT_DEPTH_LIMIT && !returnMove) {
+	if (depth > TT_DEPTH_LIMIT && !rootSearch) {
 		auto hash = this->hash();
 		entry = &(*tt)[hash & (tt->size() - 1)];
 		if constexpr (collectTTStats) {
@@ -225,26 +220,20 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 			return { entry->score };
 	}
 
-	auto* newMovesBegin = newMoves;
-	generateMoves(newMoves, moveMask);
-
-	// // move ordering
-	// std::sort(newMovesBegin, newMoves, [](const auto& a, const auto& b) {
-	// 	return a.board.eval() < b.board.eval();
-	// });
-
 	// recursive search
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
-	for (auto it = newMovesBegin; it != newMoves; ++it) {
-		auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask) + 1;
+	generateMoves(moveMask, [&](Board board, U64 moveMask) {
+		auto score = board.search<false>(depth - 1, moveMask) + 1;
 		if (score < best) {
 			best = score;
-			bestNextBoard = it->board;
+			bestNextBoard = board;
 			if (score <= depth)
-				break;
+				return true;
 		}
-	}
+		return false;
+	});
+
 
 	if (depth > TT_DEPTH_LIMIT && (!entry->board.occupied || entry->depth < depth + 2))
 		*entry = {
@@ -253,15 +242,15 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 			.score = best,
 		};
 
-	if constexpr (!returnMove)
+	if constexpr (!rootSearch)
 		return best;
 	else
 		return {
 			.board = bestNextBoard,
-			.move = (types[0] ^ bestNextBoard.types[0]) | (types[1] ^ bestNextBoard.types[1]),
+			.move = (types[0] ^ bestNextBoard.types[0]) | (types[1] ^ bestNextBoard.types[1]) | (occupied ^ bestNextBoard.occupied),
 			.score = best,
 		};
 }
 
-template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask) const;
-template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask) const;
+template SearchReturn Board::search<true> (Depth depth, U64 moveMask) const;
+template Score        Board::search<false>(Depth depth, U64 moveMask) const;

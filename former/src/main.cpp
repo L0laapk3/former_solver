@@ -6,26 +6,14 @@
 #include <chrono>
 
 
-std::vector<Move> newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
-
-
 
 int main(int argc, char** argv) {
-	auto board = Board::fromString("PGGOGPG GOBBPBG BOOGPBG BPOOBOG GGGBBOO GBGGOPO PGOOGPG OGPPPGO OOGPOOO");
-	std::cout << board.toString() << std::endl;
+	for (int i = 0; i < 10; i++) {
+		auto board = Board::fromString("PGGOGPG GOBBPBG BOOGPBG BPOOBOG GGGBBOO GBGGOPO PGOOGPG OGPPPGO OOGPOOO");
+		std::cout << board.toString() << std::endl;
 
-	auto startTotal = std::chrono::high_resolution_clock::now();
+		auto startTotal = std::chrono::high_resolution_clock::now();
 
-	if constexpr (0) {
-		Move* newMovesEnd = &newMoves[0];
-		board.generateMoves(newMovesEnd);
-
-		std::cout << "move count: " << newMovesEnd - &newMoves[0] << std::endl;
-		if constexpr (0)
-			for (auto it = &newMoves[0]; it != newMovesEnd; ++it) {
-				std::cout << it->board.toString() << std::endl;
-			}
-	} else {
 		tt = std::make_unique<TT>();
 		U64 depth = 1;
 		bool foundSolution = false;
@@ -34,7 +22,7 @@ int main(int argc, char** argv) {
 			SearchReturn result;
 			do {
 				auto start = std::chrono::high_resolution_clock::now();
-				result = board.search<true>(&newMoves[0], depth);
+				result = board.search<true>(depth);
 				auto end = std::chrono::high_resolution_clock::now();
 				// time in milliseconds
 				std::chrono::duration<double> elapsed = end - start;
@@ -57,12 +45,12 @@ int main(int argc, char** argv) {
 			depth--;
 		}
 		auto endTotal = std::chrono::high_resolution_clock::now();
-
-		std::cout << "solution: " << solution << std::endl;
-		std::chrono::duration<double> elapsedTotal = endTotal - startTotal;
-		std::cout << "Total elapsed time: " << elapsedTotal.count() << " seconds" << std::endl;
-		Board::logStats();
 	}
+
+	// std::cout << "solution: " << solution << std::endl;
+	// std::chrono::duration<double> elapsedTotal = endTotal - startTotal;
+	// std::cout << "Total elapsed time: " << elapsedTotal.count() << " seconds" << std::endl;
+	// Board::logStats();
 
   	return 0;
 }
