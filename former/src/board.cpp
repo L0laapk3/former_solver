@@ -3,6 +3,8 @@
 #include <iostream>
 #include <cassert>
 #include <bit>
+#include <algorithm>
+#include <limits>
 
 
 
@@ -11,7 +13,7 @@ Board Board::fromString(std::string_view str) {
 	auto it = str.begin();
 	for (size_t y = 0; y < HEIGHT; y++)
 		for (size_t x = 0; x < WIDTH; x++) {
-			U64 bit = 1ULL << (y * WIDTH + x);
+			U64 bit = 1ULL << (x * HEIGHT + (HEIGHT - 1 - y));
 			while (true) {
 				if (it == str.end()) {
 					throw std::invalid_argument("invalid board string");
@@ -39,7 +41,7 @@ std::string Board::toString() const {
 	std::string str;
 	for (size_t y = 0; y < HEIGHT; y++) {
 		for (size_t x = 0; x < WIDTH; x++) {
-			U64 bit = 1ULL << (y * WIDTH + x);
+			U64 bit = 1ULL << (x * HEIGHT + (HEIGHT - 1 - y));
 			if (occupied & bit) {
 				if (type[0] & bit) {
 					if (type[1] & bit) {
@@ -68,10 +70,10 @@ std::string Board::toString() const {
 void Board::generateMoves(Board*& newBoards) const {
 	U64 moves = occupied;
 
-	U64 leftSame  = ~((type[0] << 1) ^ type[0]) & ~((type[1] << 1) ^ type[1]) & MASK_LEFT;
-	U64 rightSame = ~((type[0] >> 1) ^ type[0]) & ~((type[1] >> 1) ^ type[1]) & MASK_RIGHT;
-	U64 upSame    = ~((type[0] << WIDTH) ^ type[0]) & ~((type[1] << WIDTH) ^ type[1]) & MASK_UP;
-	U64 downSame  = ~((type[0] >> WIDTH) ^ type[0]) & ~((type[1] >> WIDTH) ^ type[1]) & MASK_DOWN;
+	U64 leftSame  = ~((type[0] << HEIGHT) ^ type[0]) & ~((type[1] << HEIGHT) ^ type[1]) & MASK_LEFT;
+	U64 rightSame = ~((type[0] >> HEIGHT) ^ type[0]) & ~((type[1] >> HEIGHT) ^ type[1]) & MASK_RIGHT;
+	U64 upSame    = ~((type[0] << 1) ^ type[0]) & ~((type[1] << 1) ^ type[1]) & MASK_UP;
+	U64 downSame  = ~((type[0] >> 1) ^ type[0]) & ~((type[1] >> 1) ^ type[1]) & MASK_DOWN;
 
 	Board* newBoardsBegin = newBoards;
 	while (moves) {
@@ -80,7 +82,8 @@ void Board::generateMoves(Board*& newBoards) const {
 		U64 lastMove;
 		do {
 			lastMove = move;
-			move |= ((move << 1) & leftSame) | ((move >> 1) & rightSame) | ((move << WIDTH) & upSame) | ((move >> WIDTH) & downSame);
+			// it may be faster to do less iterations but longer critical path, but probably not.
+			move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
 		} while (lastMove != move);
 
 		*newBoards = *this;
@@ -92,16 +95,36 @@ void Board::generateMoves(Board*& newBoards) const {
 }
 
 
-void Board::search(Board* newBoards, size_t depth) const {
+
+Score Board::eval() const {
+	return std::popcount(occupied);
+}
+
+
+Score Board::search(Board* newBoards, size_t depth) const {
+	if (occupied == 0)
+		return 0;
+
 	if (depth == 0) {
 		*newBoards = *this;
 		newBoards++;
-		return;
+		return eval();
 	}
 
-	Board* newBoardsEnd = newBoards;
-	generateMoves(newBoardsEnd);
-	std::sort(newBoards, newBoardsEnd, [](const Board& a, const Board& b) {
-		return std::popcnt(a.occupied) < std::popcnt(b.occupied);
+	Board* newBoardsBegin = newBoards;
+	generateMoves(newBoards);
+
+	// move ordering
+	std::sort(newBoardsBegin, newBoards, [](const Board& a, const Board& b) {
+		return a.eval() < b.eval();
 	});
+
+	// recursive search
+	Score best = std::numeric_limits<Score>::max();
+	for (auto it = newBoardsBegin; it != newBoards; ++it) {
+		auto score = it->search(newBoards, depth - 1);
+		if (score < best)
+			best = score;
+	}
+	return best + 1;
 }
