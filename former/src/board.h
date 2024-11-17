@@ -58,7 +58,7 @@ struct TTEntry {
 	Depth depth;
 	Score score;
 };
-constexpr U64 TT_DEPTH_LIMIT = 5;
+constexpr U64 TT_DEPTH_LIMIT = 0;
 constexpr size_t TT_SIZE_LOG2 = 24;
 typedef std::array<TTEntry, 1ULL << TT_SIZE_LOG2> TT;
 extern std::unique_ptr<TT> tt;

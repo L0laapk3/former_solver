@@ -171,7 +171,8 @@ Score Board::movesLowerBound() const {
 	return std::popcount(counts);
 }
 
-constexpr bool collectTTStats = true;
+constexpr bool countNodes = false;
+constexpr bool collectTTStats = false;
 U64 ttHits = 0;
 U64 ttCollisions = 0;
 U64 ttEmpty = 0;
@@ -184,12 +185,14 @@ void Board::logStats() {
 		ttCollisions = 0;
 		ttEmpty = 0;
 	}
-	std::cout << "nodes: " << nodes << std::endl;
+	if constexpr (countNodes)
+		std::cout << "nodes: " << nodes << std::endl;
 }
 
 template<bool returnMove>
 std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask) const {
-	nodes++;
+	if constexpr (countNodes)
+		nodes++;
 	if (occupied == 0) {
 		if constexpr (!returnMove)
 			return { 0 };
