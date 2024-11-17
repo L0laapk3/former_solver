@@ -1,4 +1,5 @@
 #include "board.h"
+#include "former/src/types.h"
 #include <bitset>
 #include <immintrin.h>
 #include <stdexcept>
@@ -91,6 +92,10 @@ U64 Board::toColumnMask(U64 bits) {
 }
 
 
+U64 Board::partialOrderReductionMask(U64 move, Board& newBoard) const {
+	// Partial order reductions: Mask away all moves starting 2 columns to the right
+	return ~0ULL << (_tzcnt_u64(move >> HEIGHT) / HEIGHT * HEIGHT);
+}
 
 void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 	U64 moves = occupied & moveMask;
@@ -135,13 +140,22 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 
 		*newMoves = {
 			.board = newBoard,
-			.moveMask = ~0ULL << (_tzcnt_u64(move >> HEIGHT) / HEIGHT * HEIGHT), // Partial order reductions: Mask away all moves starting 2 columns to the right
+			.moveMask = partialOrderReductionMask(move, newBoard),
 		};
 
 		newMoves++;
 	}
 }
 
+U64 Board::hash() const {
+	U64 hash1 = ((U128)types[0] * 12769894017520768087ULL) >> 64;
+	U64 hash2 = ((U128)types[1] * 14976091711589288359ULL) >> 64;
+	U64 hash3 = ((U128)occupied * 9292276211755231913ULL) >> 64;
+	return hash1 ^ hash2 ^ hash3;
+}
+
+
+std::unique_ptr<TT> tt;
 
 // minimum move count required to clear the board
 Score Board::eval() const {
@@ -153,14 +167,56 @@ Score Board::eval() const {
 	return score;
 }
 
+constexpr bool collectTTStats = true;
+U64 ttHits = 0;
+U64 ttCollisions = 0;
+U64 ttEmpty = 0;
+U64 nodes = 0;
+
+void Board::logStats() {
+	if constexpr (collectTTStats) {
+		std::cout << "tt hits: " << ttHits << " collisions: " << ttCollisions << " empty: " << ttEmpty << std::endl;
+		ttHits = 0;
+		ttCollisions = 0;
+		ttEmpty = 0;
+	}
+	std::cout << "nodes: " << nodes << std::endl;
+}
 
 template<bool returnMove>
-std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, size_t depth, U64 moveMask) const {
-	if (occupied == 0)
-		return { 0 };
+std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask) const {
+	nodes++;
+	if (occupied == 0) {
+		if constexpr (!returnMove)
+			return { 0 };
+		else
+			return { .score = 0 };
+	}
 
-	if (depth < eval())
-		return { std::numeric_limits<Score>::max() - MAX_MOVES };
+	if (depth < eval()) {
+		if constexpr (!returnMove)
+			return { std::numeric_limits<Score>::max() - MAX_MOVES };
+		else
+			return { .score = std::numeric_limits<Score>::max() - MAX_MOVES };
+	}
+
+	// TT lookup
+	TTEntry* entry;
+	if (depth > TT_DEPTH_LIMIT && !returnMove) {
+		auto hash = this->hash();
+		entry = &(*tt)[hash & (tt->size() - 1)];
+		if constexpr (collectTTStats) {
+			if (entry->board.occupied == 0)
+				ttEmpty++;
+			else if (entry->board == *this)
+				ttHits++;
+			else
+				ttCollisions++;
+		}
+
+		if (entry->board == *this && entry->depth >= depth)
+			return { entry->score };
+	}
 
 	auto* newMovesBegin = newMoves;
 	generateMoves(newMoves, moveMask);
@@ -182,11 +238,23 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 				break;
 		}
 	}
+
+	if (depth > TT_DEPTH_LIMIT && (!entry->board.occupied || entry->depth < depth + 2))
+		*entry = {
+			.board = *this,
+			.depth = depth,
+			.score = best,
+		};
+
 	if constexpr (!returnMove)
 		return best;
 	else
-		return {best, bestNextBoard, (types[0] ^ bestNextBoard.types[0]) | (types[1] ^ bestNextBoard.types[1])};
+		return {
+			.board = bestNextBoard,
+			.move = (types[0] ^ bestNextBoard.types[0]) | (types[1] ^ bestNextBoard.types[1]),
+			.score = best,
+		};
 }
 
-template SearchReturn Board::search<true> (Move* newMoves, size_t depth, U64 moveMask) const;
-template Score        Board::search<false>(Move* newMoves, size_t depth, U64 moveMask) const;
+template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask) const;
+template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask) const;

@@ -5,10 +5,12 @@
 #include <string>
 #include <span>
 #include <iterator>
+#include <memory>
 
 #include "types.h"
 
-typedef U64 Score;
+typedef U32 Score;
+typedef U32 Depth;
 
 struct Move;
 struct SearchReturn;
@@ -29,6 +31,9 @@ struct Board {
 	U64 occupied;
 	std::array<U64, 2> types;
 
+	// spaceship operator
+	auto operator<=>(const Board&) const = default;
+
 	static Board fromString(std::string_view str);
 	std::string toString() const;
 	static std::string toBitString(U64 bits);
@@ -36,18 +41,32 @@ struct Board {
 
 	static U64 toColumnMask(U64 bits);
 
+	U64 hash() const;
+	static void logStats();
+
 	Score eval() const;
 
+	U64 partialOrderReductionMask(U64 move, Board& newBoard) const;
 	void generateMoves(Move*& newMoves, U64 moveMask = ~0ULL) const;
 
 	template<bool returnMove>
-	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, size_t depth, U64 moveMask = ~0ULL) const;
+	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask = ~0ULL) const;
 };
 
-struct SearchReturn {
+struct TTEntry {
+	Board board;
+	Depth depth;
 	Score score;
+};
+constexpr U64 TT_DEPTH_LIMIT = 5;
+constexpr size_t TT_SIZE_LOG2 = 24;
+typedef std::array<TTEntry, 1ULL << TT_SIZE_LOG2> TT;
+extern std::unique_ptr<TT> tt;
+
+struct SearchReturn {
 	Board board;
 	U64 move;
+	Score score;
 };
 
 struct Move {
