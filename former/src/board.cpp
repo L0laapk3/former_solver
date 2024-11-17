@@ -76,80 +76,95 @@ std::string Board::toBitString(U64 bits) {
 }
 
 
+U64 Board::toColumnMask(U64 bits) {
+	U64 addShit = (bits & ~MASK_TOP) + ~MASK_TOP;
+	U64 colLsb = ((addShit | bits) >> (HEIGHT - 1)) & MASK_BOTTOM;
+	// This multiplication could be replaced with a subtraction and some masking/oring?
+	return (colLsb & MASK_BOTTOM) * MASK_LEFT;
+}
 
 
-void Board::generateMoves(Board*& newBoards) const {
-	U64 moves = occupied;
 
-	U64 leftSame  = ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & MASK_LEFT;
-	U64 rightSame = ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & MASK_RIGHT;
-	U64 upSame    = ~((types[0] << 1) ^ types[0]) & ~((types[1] << 1) ^ types[1]) & MASK_UP;
-	U64 downSame  = ~((types[0] >> 1) ^ types[0]) & ~((types[1] >> 1) ^ types[1]) & MASK_DOWN;
+void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
+	U64 moves = occupied & moveMask;
 
-	Board* newBoardsBegin = newBoards;
+	U64 leftSame  = ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
+	U64 rightSame = ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
+	U64 upSame    = ~((types[0] << 1) ^ types[0]) & ~((types[1] << 1) ^ types[1]) & ~MASK_BOTTOM;
+	U64 downSame  = ~((types[0] >> 1) ^ types[0]) & ~((types[1] >> 1) ^ types[1]) & ~MASK_TOP;
+
+	Move* newMovesBegin = newMoves;
 	while (moves) {
-		assert(newBoards != newBoardsBegin + MAX_MOVES);
+		assert(newMoves != newMovesBegin + MAX_MOVES);
 		U64 move = moves & -moves;
 		U64 lastMove;
 		do {
 			lastMove = move;
 			// it may be faster to do less iterations but longer critical path, but probably not.
-			move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
+			move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame));
 		} while (lastMove != move);
 
-		*newBoards = *this;
-		newBoards->occupied ^= move;
-		moves ^= move;
+		Board newBoard = *this;
+		newBoard.occupied &= ~move;
+		moves             &= ~move;
 
-		std::cout << "before gravity" << std::endl;
-		std::cout << newBoards->toString() << std::endl;
+		toColumnMask(move);
+
+		// std::cout << "before gravity" << std::endl;
+		// std::cout << newBoard.toString() << std::endl;
 
 		// apply gravity
-		for (auto& type : newBoards->types)
-			type = _pext_u64(type, newBoards->occupied);
+		for (auto& type : newBoard.types)
+			type = _pext_u64(type, newBoard.occupied);
 
-		newBoards->occupied = _pdep_u64(_pext_u64( MASK_COL_ODD, (newBoards->occupied &  MASK_COL_ODD) | ((~newBoards->occupied &  MASK_COL_ODD) << HEIGHT)),  MASK_COL_ODD)
-		                    | _pdep_u64(_pext_u64(~MASK_COL_ODD, (newBoards->occupied & ~MASK_COL_ODD) | ((~newBoards->occupied & ~MASK_COL_ODD) << HEIGHT)), ~MASK_COL_ODD);
+		newBoard.occupied = _pdep_u64(_pext_u64( MASK_COL_ODD, (newBoard.occupied &  MASK_COL_ODD) | ((~newBoard.occupied &  MASK_COL_ODD) << HEIGHT)),  MASK_COL_ODD)
+		                  | _pdep_u64(_pext_u64(~MASK_COL_ODD, (newBoard.occupied & ~MASK_COL_ODD) | ((~newBoard.occupied & ~MASK_COL_ODD) << HEIGHT)), ~MASK_COL_ODD);
 
-		for (auto& type : newBoards->types)
-			type = _pdep_u64(type, newBoards->occupied);
+		for (auto& type : newBoard.types)
+			type = _pdep_u64(type, newBoard.occupied);
 
-		std::cout << "after gravity" << std::endl;
-		std::cout << newBoards->toString() << std::endl;
+		// std::cout << "after gravity" << std::endl;
+		// std::cout << newBoard.toString() << std::endl;
 
-		newBoards++;
+		*newMoves = {
+			.board = newBoard,
+			.moveMask = ~0ULL << (_tzcnt_u64(move >> HEIGHT) / HEIGHT * HEIGHT), // Partial order reductions: Mask away all moves starting 2 columns to the right
+		};
+
+		newMoves++;
 	}
 }
 
 
-
+// minimum move count required to clear the board
 Score Board::eval() const {
 	return std::popcount(occupied);
 }
 
 
-Score Board::search(Board* newBoards, size_t depth) const {
+Score Board::search(Move* newMoves, size_t depth, U64 moveMask) const {
 	if (occupied == 0)
 		return 0;
 
 	if (depth == 0) {
-		*newBoards = *this;
-		newBoards++;
+		newMoves++;
 		return eval();
 	}
 
-	Board* newBoardsBegin = newBoards;
-	generateMoves(newBoards);
+	auto* newMovesBegin = newMoves;
+	generateMoves(newMoves, moveMask);
 
-	// move ordering
-	std::sort(newBoardsBegin, newBoards, [](const Board& a, const Board& b) {
-		return a.eval() < b.eval();
-	});
+	// // move ordering
+	// std::sort(newMovesBegin, newMoves, [](const auto& a, const auto& b) {
+	// 	return a.board.eval() < b.board.eval();
+	// });
 
 	// recursive search
-	Score best = std::numeric_limits<Score>::max();
-	for (auto it = newBoardsBegin; it != newBoards; ++it) {
-		auto score = it->search(newBoards, depth - 1);
+	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
+	for (auto it = newMovesBegin; it != newMoves; ++it) {
+		auto score = it->board.search(newMoves, depth - 1, it->moveMask);
+		if (score < 5)
+			it->board.search(newMoves, depth - 1, it->moveMask);
 		if (score < best)
 			best = score;
 	}

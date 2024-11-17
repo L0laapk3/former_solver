@@ -10,16 +10,16 @@
 
 typedef U64 Score;
 
-struct Board;
+struct Move;
 struct Board {
 	static constexpr size_t WIDTH = 7;
 	static constexpr size_t HEIGHT = 9;
 	static constexpr size_t SIZE = WIDTH * HEIGHT;
 
-	static constexpr U64 MASK_LEFT     = 0b0'111111111'111111111'111111111'111111111'111111111'111111111'000000000;
-	static constexpr U64 MASK_RIGHT    = 0b0'000000000'111111111'111111111'111111111'111111111'111111111'111111111;
-	static constexpr U64 MASK_UP       = 0b0'111111110'111111110'111111110'111111110'111111110'111111110'111111110;
-	static constexpr U64 MASK_DOWN     = 0b0'011111111'011111111'011111111'011111111'011111111'011111111'011111111;
+	static constexpr U64 MASK_LEFT     = 0b0'000000000'000000000'000000000'000000000'000000000'000000000'111111111;
+	static constexpr U64 MASK_RIGHT    = 0b0'111111111'000000000'000000000'000000000'000000000'000000000'000000000;
+	static constexpr U64 MASK_BOTTOM   = 0b0'000000001'000000001'000000001'000000001'000000001'000000001'000000001;
+	static constexpr U64 MASK_TOP      = 0b0'100000000'100000000'100000000'100000000'100000000'100000000'100000000;
 	static constexpr U64 MASK_COL_ODD  = 0b0'111111111'000000000'111111111'000000000'111111111'000000000'111111111;
 
 	static constexpr size_t MAX_MOVES = SIZE;
@@ -31,9 +31,17 @@ struct Board {
 	std::string toString() const;
 	static std::string toBitString(U64 bits);
 
+	static U64 toColumnMask(U64 bits);
+
 	Score eval() const;
 
-	void generateMoves(Board*& newBoards) const;
+	void generateMoves(Move*& newMoves, U64 moveMask = ~0ULL) const;
 
-	Score search(Board* newBoards, size_t depth) const;
+	Score search(Move* newMoves, size_t depth, U64 moveMask = ~0ULL) const;
+};
+
+
+struct Move {
+	Board board;
+	U64 moveMask;
 };
