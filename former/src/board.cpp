@@ -100,10 +100,10 @@ U64 Board::partialOrderReductionMask(U64 move, Board& newBoard) const {
 void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 	U64 moves = occupied & moveMask;
 
-	U64 leftSame  = ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
-	U64 rightSame = ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
-	U64 upSame    = ~((types[0] << 1) ^ types[0]) & ~((types[1] << 1) ^ types[1]) & ~MASK_BOTTOM;
-	U64 downSame  = ~((types[0] >> 1) ^ types[0]) & ~((types[1] >> 1) ^ types[1]) & ~MASK_TOP;
+	U64 leftSame  = occupied & ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
+	U64 rightSame = occupied & ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
+	U64 upSame    = occupied & ~((types[0] << 1     ) ^ types[0]) & ~((types[1] << 1     ) ^ types[1]) & ~MASK_BOTTOM;
+	U64 downSame  = occupied & ~((types[0] >> 1     ) ^ types[0]) & ~((types[1] >> 1     ) ^ types[1]) & ~MASK_TOP;
 
 	Move* newMovesBegin = newMoves;
 	while (moves) {
@@ -112,16 +112,15 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 		U64 lastMove;
 		// profiling: 13%
 		do {
-			lastMove = move;
-			// it may be faster to do less iterations but longer critical path, but probably not.
-			move |= occupied & (((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame));
+			for (size_t i = 0; i < 2; i++) {
+				lastMove = move;
+				move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
+			}
 		} while (lastMove != move);
 
 		Board newBoard = *this;
 		newBoard.occupied &= ~move;
 		moves             &= ~move;
-
-		toColumnMask(move);
 
 		// std::cout << "before gravity" << std::endl;
 		// std::cout << newBoard.toString() << std::endl;
