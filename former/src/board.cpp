@@ -98,7 +98,7 @@ U64 Board::partialOrderReductionMask(U64 move, Board& newBoard) const {
 }
 
 void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
-	U64 moves = occupied & moveMask;
+	U64 moves = occupied;// & moveMask;
 
 	U64 leftSame  = ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
 	U64 rightSame = ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
@@ -177,6 +177,7 @@ U64 ttHits = 0;
 U64 ttCollisions = 0;
 U64 ttEmpty = 0;
 U64 nodes = 0;
+U64 solutions = 0;
 
 void Board::logStats() {
 	if constexpr (collectTTStats) {
@@ -187,6 +188,8 @@ void Board::logStats() {
 	}
 	if constexpr (countNodes)
 		std::cout << "nodes: " << nodes << std::endl;
+	std::cout << "solutions: " << solutions << std::endl;
+	solutions = 0;
 }
 
 template<bool returnMove>
@@ -221,8 +224,10 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 				ttCollisions++;
 		}
 
-		if (entry->board == *this && entry->depth >= depth)
+		if (entry->board == *this && entry->depth >= depth) {
+			solutions += entry->solutions;
 			return { entry->score };
+		}
 	}
 
 	auto* newMovesBegin = newMoves;
@@ -236,13 +241,16 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	// recursive search
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
+
+	U64 solutionsBegin = solutions;
+
 	for (auto it = newMovesBegin; it != newMoves; ++it) {
 		auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask) + 1;
 		if (score < best) {
 			best = score;
 			bestNextBoard = it->board;
 			if (score <= depth)
-				break;
+				solutions++;
 		}
 	}
 
@@ -251,6 +259,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 			.board = *this,
 			.depth = depth,
 			.score = best,
+			.solutions = solutions - solutionsBegin,
 		};
 
 	if constexpr (!returnMove)

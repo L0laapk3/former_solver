@@ -57,6 +57,7 @@ struct TTEntry {
 	Board board;
 	Depth depth;
 	Score score;
+	U64 solutions;
 };
 constexpr U64 TT_DEPTH_LIMIT = 0;
 constexpr size_t TT_SIZE_LOG2 = 24;
