@@ -16,6 +16,7 @@ int main(int argc, char** argv) {
 
 	auto startTotal = std::chrono::high_resolution_clock::now();
 
+
 	if constexpr (0) {
 		Move* newMovesEnd = &newMoves[0];
 		board.generateMoves(newMovesEnd);

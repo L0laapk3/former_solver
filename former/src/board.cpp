@@ -110,6 +110,7 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 		assert(newMoves != newMovesBegin + MAX_MOVES);
 		U64 move = moves & -moves;
 		U64 lastMove;
+		// profiling: 13%
 		do {
 			lastMove = move;
 			// it may be faster to do less iterations but longer critical path, but probably not.
@@ -129,6 +130,7 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 		for (auto& type : newBoard.types)
 			type = _pext_u64(type, newBoard.occupied);
 
+		// profiling: 8%
 		newBoard.occupied = _pdep_u64(_pext_u64( MASK_COL_ODD, (newBoard.occupied &  MASK_COL_ODD) | ((~newBoard.occupied &  MASK_COL_ODD) << HEIGHT)),  MASK_COL_ODD)
 		                  | _pdep_u64(_pext_u64(~MASK_COL_ODD, (newBoard.occupied & ~MASK_COL_ODD) | ((~newBoard.occupied & ~MASK_COL_ODD) << HEIGHT)), ~MASK_COL_ODD);
 
@@ -159,6 +161,7 @@ std::unique_ptr<TT> tt;
 
 // minimum move count required to clear the board
 Score Board::movesLowerBound() const {
+	// profiling: 10%
 	U64 counts = 0;
 	U64 color0Cols = toColumnMask(~types[0] & ~types[1] & occupied);
 	counts |= (color0Cols & ~(color0Cols << 1));
@@ -208,6 +211,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	}
 
 	// TT lookup
+	// profiling: 45%
 	TTEntry* entry;
 	if (depth > TT_DEPTH_LIMIT && !returnMove) {
 		auto hash = this->hash();

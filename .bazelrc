@@ -7,11 +7,15 @@ build --config=common
 
 build:opt --copt=-Ofast
 build:opt --cxxopt=-Ofast
-build:opt --strip=always
 build:opt --copt=-flto
+build:opt --strip=always
 build:opt --cxxopt=-flto
 build:opt --linkopt=-flto
-build:opt --strip=always
+
+build:opt_symbols --config=opt
+build:opt_symbols --strip=never
+build:opt_symbols --copt=-g
+build:opt_symbols --cxxopt=-g
 
 build:dbg --config=common
 build:dbg --copt=-g
