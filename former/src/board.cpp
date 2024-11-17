@@ -74,6 +74,13 @@ std::string Board::toBitString(U64 bits) {
 	}
 	return result;
 }
+std::string Board::toMoveString(U64 move) {
+	// chess notation
+	U64 bit = move & -move;
+	size_t x = _tzcnt_u64(bit) / HEIGHT;
+	size_t y = HEIGHT - 1 - _tzcnt_u64(bit) % HEIGHT;
+	return std::string(1, 'A' + x) + std::to_string(HEIGHT - y);
+}
 
 
 U64 Board::toColumnMask(U64 bits) {
@@ -101,7 +108,7 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 		do {
 			lastMove = move;
 			// it may be faster to do less iterations but longer critical path, but probably not.
-			move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame));
+			move |= occupied & (((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame));
 		} while (lastMove != move);
 
 		Board newBoard = *this;
@@ -138,18 +145,22 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 
 // minimum move count required to clear the board
 Score Board::eval() const {
-	return std::popcount(occupied);
+	Score score = 0;
+	if (~types[0] & ~types[1] & occupied) score++;
+	if ( types[0] & ~types[1]           ) score++;
+	if (~types[0] &  types[1]           ) score++;
+	if ( types[0] &  types[1]           ) score++;
+	return score;
 }
 
 
-Score Board::search(Move* newMoves, size_t depth, U64 moveMask) const {
+template<bool returnMove>
+std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, size_t depth, U64 moveMask) const {
 	if (occupied == 0)
-		return 0;
+		return { 0 };
 
-	if (depth == 0) {
-		newMoves++;
-		return eval();
-	}
+	if (depth < eval())
+		return { std::numeric_limits<Score>::max() - MAX_MOVES };
 
 	auto* newMovesBegin = newMoves;
 	generateMoves(newMoves, moveMask);
@@ -161,12 +172,21 @@ Score Board::search(Move* newMoves, size_t depth, U64 moveMask) const {
 
 	// recursive search
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
+	Board bestNextBoard;
 	for (auto it = newMovesBegin; it != newMoves; ++it) {
-		auto score = it->board.search(newMoves, depth - 1, it->moveMask);
-		if (score < 5)
-			it->board.search(newMoves, depth - 1, it->moveMask);
-		if (score < best)
+		auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask) + 1;
+		if (score < best) {
 			best = score;
+			bestNextBoard = it->board;
+			if (score <= depth)
+				break;
+		}
 	}
-	return best + 1;
+	if constexpr (!returnMove)
+		return best;
+	else
+		return {best, bestNextBoard, (types[0] ^ bestNextBoard.types[0]) | (types[1] ^ bestNextBoard.types[1])};
 }
+
+template SearchReturn Board::search<true> (Move* newMoves, size_t depth, U64 moveMask) const;
+template Score        Board::search<false>(Move* newMoves, size_t depth, U64 moveMask) const;

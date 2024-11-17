@@ -25,7 +25,34 @@ int main(int argc, char** argv) {
 				std::cout << it->board.toString() << std::endl;
 			}
 	} else {
-		std::cout << board.search(&newMoves[0], 6) << std::endl;
+		U64 depth = 1;
+		bool foundSolution = false;
+		std::string solution = "";
+		while (board.occupied) {
+			SearchReturn result;
+			do {
+				result = board.search<true>(&newMoves[0], depth);
+				if (result.score > depth) {
+					std::cout << "No solution at depth " << depth << std::endl;
+					if (foundSolution)
+						return 1;
+					depth++;
+				}
+			} while (!foundSolution);
+			std::cout << Board::toMoveString(result.move) << std::endl;
+			std::cout << result.board.toString() << std::endl;
+			// std::cout << Board::toBitString(result.board.types[0]) << std::endl;
+			// std::cout << Board::toBitString(result.board.types[1]) << std::endl;
+			// std::cout << Board::toBitString(result.board.occupied) << std::endl;
+
+
+			solution += Board::toMoveString(result.move) + " ";
+
+			board = result.board;
+			depth--;
+		}
+
+		std::cout << "solution: " << solution << std::endl;
 	}
 
 	auto end = std::chrono::high_resolution_clock::now();

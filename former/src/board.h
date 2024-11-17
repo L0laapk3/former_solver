@@ -11,6 +11,8 @@
 typedef U64 Score;
 
 struct Move;
+struct SearchReturn;
+
 struct Board {
 	static constexpr size_t WIDTH = 7;
 	static constexpr size_t HEIGHT = 9;
@@ -30,6 +32,7 @@ struct Board {
 	static Board fromString(std::string_view str);
 	std::string toString() const;
 	static std::string toBitString(U64 bits);
+	static std::string toMoveString(U64 move);
 
 	static U64 toColumnMask(U64 bits);
 
@@ -37,9 +40,15 @@ struct Board {
 
 	void generateMoves(Move*& newMoves, U64 moveMask = ~0ULL) const;
 
-	Score search(Move* newMoves, size_t depth, U64 moveMask = ~0ULL) const;
+	template<bool returnMove>
+	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, size_t depth, U64 moveMask = ~0ULL) const;
 };
 
+struct SearchReturn {
+	Score score;
+	Board board;
+	U64 move;
+};
 
 struct Move {
 	Board board;
