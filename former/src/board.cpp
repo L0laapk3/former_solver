@@ -94,19 +94,31 @@ U64 Board::toColumnMask(U64 bits) {
 
 
 U64 Board::partialOrderReductionMask(U64 move, Board& board) const {
+
+	// std::cout << "in:   " << toBitString(move) << std::endl;
+	// std::cout << "occ:  " << toBitString(occupied) << std::endl;
 	// East 1: Mask away all moves starting 2 columns to the right
 	auto colIndex = _tzcnt_u64(move) / HEIGHT * HEIGHT;
+
+	// std::cout << "lsbm: " << toBitString(MASK_LEFT << colIndex) << std::endl;
+	// std::cout << "mask: " << toBitString(~((~occupied & (MASK_LEFT << colIndex)) >> HEIGHT)) << std::endl;
+	U64 east3 = ~((~occupied & (MASK_LEFT << colIndex)) >> HEIGHT);
 
 	// East 2: Mask away all moves starting 1 column to the right if some color bullshit
 	U64 cellsToCheck = ((0x200ULL << colIndex) - (move & -move)) >> HEIGHT;
 	// std::cout << "check" << toBitString(cellsToCheck) << std::endl;
 	U64 type0 = move & types[0] ? ~0ULL : 0;
 	U64 type1 = move & types[1] ? ~0ULL : 0;
-	// std::cout << "type0: " << (type0 ? "1" : "0") << " type1: " << (type1 ? "1" : "0") << " cond: " << (cellsToCheck != (cellsToCheck & ((types[0] ^ type0) | (types[1] ^ type1))) ? "1" : "0") << std::endl;
 	if (cellsToCheck != (cellsToCheck & ((types[0] ^ type0) | (types[1] ^ type1))))
 		colIndex -= HEIGHT;
 
-	return ~0ULL << colIndex;
+	U64 result = ~0ULL << colIndex;
+
+	// std::cout << "out1: " << toBitString(result) << std::endl;
+	result &= east3;
+	// std::cout << "out2: " << toBitString(result) << std::endl;
+
+	return result;
 }
 
 U64 Board::hash() const {
@@ -154,8 +166,8 @@ Score Board::movesLowerBound() const {
 	return std::popcount(counts);
 }
 
-constexpr bool countNodes = true;
-constexpr bool collectTTStats = true;
+constexpr bool countNodes = false;
+constexpr bool collectTTStats = false;
 U64 ttHits = 0;
 U64 ttCollisions = 0;
 U64 ttEmpty = 0;
