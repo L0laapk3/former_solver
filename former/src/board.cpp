@@ -93,7 +93,7 @@ U64 Board::toColumnMask(U64 bits) {
 }
 
 
-U64 Board::partialOrderReductionMask(U64 move, Board& board) const {
+U64 Board::partialOrderReductionMask(U64 move) const {
 
 	// std::cout << "in:   " << toBitString(move) << std::endl;
 	// std::cout << "occ:  " << toBitString(occupied) << std::endl;
@@ -235,7 +235,7 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 }
 
 template<bool returnMove>
-std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const {
+std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 move, const Board& lastBoard, U64 hash) const {
 	if constexpr (countNodes)
 		nodes++;
 	if (occupied == 0) {
@@ -269,6 +269,11 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	auto* newMovesBegin = newMoves;
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
+	U64 moveMask;
+	if constexpr (returnMove)
+		moveMask = ~0ULL;
+	else
+		moveMask = lastBoard.partialOrderReductionMask(move);
 	if (!generateMoves(moveMask, [&](Board& board, U64 move) {
 		if (board.occupied == 0) {
 			best = 1;
@@ -280,7 +285,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 
 		*newMoves = {
 			.board = board,
-			.moveMask = partialOrderReductionMask(move, board),
+			.move = move,
 		};
 		newMoves++;
 
@@ -292,7 +297,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 			__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
 		}
 		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask, it->hash) + 1;
+			auto score = it->board.search<false>(newMoves, depth - 1, it->move, *this, it->hash) + 1;
 			if (score < best) {
 				best = score;
 				bestNextBoard = it->board;
@@ -324,6 +329,5 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 			.score = best,
 		};
 }
-
-template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask, U64 hash) const;
-template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const;
+template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 move, const Board& lastBoard, U64 hash) const;
+template Score        Board::search<false>(Move* newMoves, Depth depth, U64 move, const Board& lastBoard, U64 hash) const;
