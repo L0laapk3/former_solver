@@ -46,8 +46,9 @@ struct Board {
 
 	Score movesLowerBound() const;
 
-	U64 partialOrderReductionMask(U64 move, Board& newBoard) const;
-	void generateMoves(Move*& newMoves, U64 moveMask = ~0ULL) const;
+	U64 partialOrderReductionMask(U64 move, Board& board) const;
+	template<typename Callable>
+	bool generateMoves(U64 moveMask, Callable cb) const;
 
 	template<bool returnMove>
 	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask = ~0ULL) const;

@@ -93,66 +93,20 @@ U64 Board::toColumnMask(U64 bits) {
 }
 
 
-U64 Board::partialOrderReductionMask(U64 move, Board& newBoard) const {
-	// Partial order reductions: Mask away all moves starting 2 columns to the right
-	// std::cout << _lzcnt_u64(move) << " " << _lzcnt_u64(move) / HEIGHT * HEIGHT << std::endl;
-	auto tmp = _tzcnt_u64(move) / HEIGHT * HEIGHT;
-	if (tmp > 0)
-		tmp -= HEIGHT;
-	return ~0ULL << tmp;
-}
+U64 Board::partialOrderReductionMask(U64 move, Board& board) const {
+	// East 1: Mask away all moves starting 2 columns to the right
+	auto colIndex = _tzcnt_u64(move) / HEIGHT * HEIGHT;
 
-void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
-	U64 moves = occupied & moveMask;
+	// East 2: Mask away all moves starting 1 column to the right if some color bullshit
+	U64 cellsToCheck = ((0x200ULL << colIndex) - (move & -move)) >> HEIGHT;
+	// std::cout << "check" << toBitString(cellsToCheck) << std::endl;
+	U64 type0 = move & types[0] ? ~0ULL : 0;
+	U64 type1 = move & types[1] ? ~0ULL : 0;
+	// std::cout << "type0: " << (type0 ? "1" : "0") << " type1: " << (type1 ? "1" : "0") << " cond: " << (cellsToCheck != (cellsToCheck & ((types[0] ^ type0) | (types[1] ^ type1))) ? "1" : "0") << std::endl;
+	if (cellsToCheck != (cellsToCheck & ((types[0] ^ type0) | (types[1] ^ type1))))
+		colIndex -= HEIGHT;
 
-	U64 leftSame  = occupied & ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
-	U64 rightSame = occupied & ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
-	U64 upSame    = occupied & ~((types[0] << 1     ) ^ types[0]) & ~((types[1] << 1     ) ^ types[1]) & ~MASK_BOTTOM;
-	U64 downSame  = occupied & ~((types[0] >> 1     ) ^ types[0]) & ~((types[1] >> 1     ) ^ types[1]) & ~MASK_TOP;
-
-	Move* newMovesBegin = newMoves;
-	while (moves) {
-		assert(newMoves != newMovesBegin + MAX_MOVES);
-		U64 move = moves & -moves;
-		U64 lastMove;
-		// profiling: 11%
-		do {
-			for (size_t i = 0; i < 2; i++) { // somewhat unrolled to make branch predictor happy
-				lastMove = move;
-				move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
-			}
-		} while (lastMove != move);
-
-		Board newBoard = *this;
-		newBoard.occupied &= ~move;
-		moves             &= ~move;
-
-		// std::cout << "before gravity" << std::endl;
-		// std::cout << newBoard.toString() << std::endl;
-
-		// apply gravity
-		for (auto& type : newBoard.types)
-			type = _pext_u64(type, newBoard.occupied);
-
-		// profiling: 8%
-		newBoard.occupied = _pdep_u64(_pext_u64( MASK_COL_ODD, (newBoard.occupied &  MASK_COL_ODD) | ((~newBoard.occupied &  MASK_COL_ODD) << HEIGHT)),  MASK_COL_ODD)
-		                  | _pdep_u64(_pext_u64(~MASK_COL_ODD, (newBoard.occupied & ~MASK_COL_ODD) | ((~newBoard.occupied & ~MASK_COL_ODD) << HEIGHT)), ~MASK_COL_ODD);
-
-		for (auto& type : newBoard.types)
-			type = _pdep_u64(type, newBoard.occupied);
-
-		// std::cout << "after gravity" << std::endl;
-		// std::cout << newBoard.toString() << std::endl;
-
-		*newMoves = {
-			.board = newBoard,
-			.moveMask = partialOrderReductionMask(move, newBoard),
-		};
-		// std::cout << "in:  " << toBitString(move) << std::endl;
-		// std::cout << "out: " << toBitString(newMoves->moveMask) << std::endl;
-
-		newMoves++;
-	}
+	return ~0ULL << colIndex;
 }
 
 U64 Board::hash() const {
@@ -179,7 +133,7 @@ U64 Board::hash() const {
 	U64 hash1 = ((U128)types[0] * 12769894017520768087ULL) >> 64;
 	U64 hash2 = ((U128)types[1] * 14976091711589288359ULL) >> 64;
 	U64 hash3 = ((U128)occupied * 9292276211755231913ULL) >> 64;
-	return hash1 ^ hash2 ^ hash3;
+	return std::hash<U64>{}(hash1 ^ hash2 ^ hash3);
 }
 
 
@@ -200,8 +154,8 @@ Score Board::movesLowerBound() const {
 	return std::popcount(counts);
 }
 
-constexpr bool countNodes = false;
-constexpr bool collectTTStats = false;
+constexpr bool countNodes = true;
+constexpr bool collectTTStats = true;
 U64 ttHits = 0;
 U64 ttCollisions = 0;
 U64 ttEmpty = 0;
@@ -210,13 +164,62 @@ U64 nodes = 0;
 void Board::logStats() {
 	if constexpr (collectTTStats) {
 		// std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / tt->size()) << "‰" << std::endl;
-		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttCollisions + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / tt->size()) << "‰" << std::endl;
+		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttCollisions + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / 2 / tt->size()) << "‰ size: 2 * " << tt->size() << std::endl;
 		ttHits = 0;
 		ttCollisions = 0;
-		ttEmpty = 0;
 	}
 	if constexpr (countNodes)
 		std::cout << "nodes: " << nodes << std::endl;
+}
+
+template<typename Callable>
+bool Board::generateMoves(U64 moveMask, Callable cb) const {
+	U64 moves = occupied & moveMask;
+
+	U64 leftSame  = occupied & ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
+	U64 rightSame = occupied & ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
+	U64 upSame    = occupied & ~((types[0] << 1     ) ^ types[0]) & ~((types[1] << 1     ) ^ types[1]) & ~MASK_BOTTOM;
+	U64 downSame  =            ~((types[0] >> 1     ) ^ types[0]) & ~((types[1] >> 1     ) ^ types[1]) & ~MASK_TOP;
+
+	while (moves) {
+		U64 move = moves & -moves;
+		U64 lastMove;
+		// profiling: 11%
+		do {
+			for (size_t i = 0; i < 2; i++) { // somewhat unrolled to make branch predictor happy
+				lastMove = move;
+				move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
+			}
+		} while (lastMove != move);
+
+		Board board = *this;
+		board.occupied &= ~move;
+		moves          &= ~move;
+
+		// std::cout << "before gravity" << std::endl;
+		// std::cout << newBoard.toString() << std::endl;
+
+		// apply gravity
+		for (auto& type : board.types)
+			type = _pext_u64(type, board.occupied);
+
+		// profiling: 8%
+		board.occupied = _pdep_u64(_pext_u64( MASK_COL_ODD, (board.occupied &  MASK_COL_ODD) | ((~board.occupied &  MASK_COL_ODD) << HEIGHT)),  MASK_COL_ODD)
+		               | _pdep_u64(_pext_u64(~MASK_COL_ODD, (board.occupied & ~MASK_COL_ODD) | ((~board.occupied & ~MASK_COL_ODD) << HEIGHT)), ~MASK_COL_ODD);
+
+		for (auto& type : board.types)
+			type = _pdep_u64(type, board.occupied);
+
+		// std::cout << "after gravity" << std::endl;
+		// std::cout << toString() << std::endl;
+
+		// std::cout << "in:  " << toBitString(move) << std::endl;
+		if (cb(board, move))
+			return true;
+		// std::cout << "out: " << toBitString(newMoves->moveMask) << std::endl;
+		// std::cout << board.toString() << std::endl;
+	}
+	return false;
 }
 
 template<bool returnMove>
@@ -240,7 +243,7 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 		if constexpr (collectTTStats) {
 			if (entry->recent.board.occupied == 0)
 				ttEmpty++;
-			else if (entry->recent.board == *this)
+			else if (entry->recent.board == *this || entry->deep.board == *this)
 				ttHits++;
 			else
 				ttCollisions++;
@@ -253,34 +256,52 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	}
 
 	auto* newMovesBegin = newMoves;
-	generateMoves(newMoves, moveMask);
-
-	// // move ordering
-	// std::sort(newMovesBegin, newMoves, [](const auto& a, const auto& b) {
-	// 	return a.board.eval() < b.board.eval();
-	// });
-
-	// recursive search
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
-	for (auto it = newMovesBegin; it != newMoves; ++it) {
-		auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask) + 1;
-		if (score < best) {
-			best = score;
-			bestNextBoard = it->board;
-			if (score <= depth)
-				break;
+	if (!generateMoves(moveMask, [&](Board& board, U64 move) {
+		if (board.occupied == 0) {
+			best = 1;
+			bestNextBoard = board;
+			return true;
+		}
+		if (depth < board.movesLowerBound())
+			return false;
+
+		*newMoves = {
+			.board = board,
+			.moveMask = partialOrderReductionMask(move, board),
+		};
+		newMoves++;
+
+		return false;
+	})) {
+		// recursive search
+		for (auto it = newMovesBegin; it != newMoves; ++it) {
+			auto hash = it->board.hash();
+			__builtin_prefetch(&(*tt)[hash % tt->size()]);
+		}
+		for (auto it = newMovesBegin; it != newMoves; ++it) {
+			auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask) + 1;
+			if (score < best) {
+				best = score;
+				bestNextBoard = it->board;
+				if (score <= depth)
+					break;
+			}
 		}
 	}
 
+
 	if (depth > TT_DEPTH_LIMIT && !returnMove) {
-		entry->recent = {
+		TTEntry newEntry{
 			.board = *this,
 			.depth = depth,
 			.score = best,
 		};
 		if (entry->deep.depth < depth)
-			entry->deep = entry->recent;
+			entry->deep = newEntry;
+		else
+			entry->recent = newEntry;
 	}
 
 	if constexpr (!returnMove)
