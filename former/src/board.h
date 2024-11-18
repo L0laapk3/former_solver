@@ -20,6 +20,7 @@ struct Board {
 	static constexpr size_t HEIGHT = 9;
 	static constexpr size_t SIZE = WIDTH * HEIGHT;
 
+	static constexpr U64 MASK_ANY      = 0b0'111111111'111111111'111111111'111111111'111111111'111111111'111111111;
 	static constexpr U64 MASK_LEFT     = 0b0'000000000'000000000'000000000'000000000'000000000'000000000'111111111;
 	static constexpr U64 MASK_RIGHT    = 0b0'111111111'000000000'000000000'000000000'000000000'000000000'000000000;
 	static constexpr U64 MASK_BOTTOM   = 0b0'000000001'000000001'000000001'000000001'000000001'000000001'000000001;
@@ -31,7 +32,6 @@ struct Board {
 	U64 occupied;
 	std::array<U64, 2> types;
 
-	// spaceship operator
 	auto operator<=>(const Board&) const = default;
 
 	static Board fromString(std::string_view str);
@@ -53,20 +53,26 @@ struct Board {
 	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask = ~0ULL) const;
 };
 
-struct TTEntry {
+struct alignas(32) TTEntry {
 	Board board;
 	Depth depth;
 	Score score;
 };
+struct alignas(64) TTRow {
+	TTEntry deep;
+	TTEntry recent;
+};
+
 constexpr U64 TT_DEPTH_LIMIT = 0;
-constexpr size_t TT_SIZE_LOG2 = 24;
-typedef std::array<TTEntry, 1ULL << TT_SIZE_LOG2> TT;
+typedef std::array<TTRow, 32ULL * 1024 * 1024 * 1024 / 8 / sizeof(TTRow)> TT;
 extern std::unique_ptr<TT> tt;
 
 struct SearchReturn {
 	Board board;
 	U64 move;
 	Score score;
+
+	operator Score() const { return score; }
 };
 
 struct Move {

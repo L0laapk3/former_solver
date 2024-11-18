@@ -1,6 +1,7 @@
 #include "board.h"
 #include "former/src/types.h"
 #include <bitset>
+#include <cmath>
 #include <immintrin.h>
 #include <stdexcept>
 #include <iostream>
@@ -94,7 +95,11 @@ U64 Board::toColumnMask(U64 bits) {
 
 U64 Board::partialOrderReductionMask(U64 move, Board& newBoard) const {
 	// Partial order reductions: Mask away all moves starting 2 columns to the right
-	return ~0ULL << (_tzcnt_u64(move >> HEIGHT) / HEIGHT * HEIGHT);
+	// std::cout << _lzcnt_u64(move) << " " << _lzcnt_u64(move) / HEIGHT * HEIGHT << std::endl;
+	auto tmp = _tzcnt_u64(move) / HEIGHT * HEIGHT;
+	if (tmp > 0)
+		tmp -= HEIGHT;
+	return ~0ULL << tmp;
 }
 
 void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
@@ -110,9 +115,9 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 		assert(newMoves != newMovesBegin + MAX_MOVES);
 		U64 move = moves & -moves;
 		U64 lastMove;
-		// profiling: 13%
+		// profiling: 11%
 		do {
-			for (size_t i = 0; i < 2; i++) {
+			for (size_t i = 0; i < 2; i++) { // somewhat unrolled to make branch predictor happy
 				lastMove = move;
 				move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
 			}
@@ -143,12 +148,34 @@ void Board::generateMoves(Move*& newMoves, U64 moveMask) const {
 			.board = newBoard,
 			.moveMask = partialOrderReductionMask(move, newBoard),
 		};
+		// std::cout << "in:  " << toBitString(move) << std::endl;
+		// std::cout << "out: " << toBitString(newMoves->moveMask) << std::endl;
 
 		newMoves++;
 	}
 }
 
 U64 Board::hash() const {
+	U64 hash = 0;
+	hash ^= types[0];
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= types[0] >> 21;
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= types[0] >> 42;
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= types[1];
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= types[1] >> 21;
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= types[1] >> 42;
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= occupied;
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= occupied >> 21;
+	hash *= 0x9e3779b97f4a7c15;
+	hash ^= occupied >> 42;
+	return hash;
+
 	U64 hash1 = ((U128)types[0] * 12769894017520768087ULL) >> 64;
 	U64 hash2 = ((U128)types[1] * 14976091711589288359ULL) >> 64;
 	U64 hash3 = ((U128)occupied * 9292276211755231913ULL) >> 64;
@@ -182,7 +209,8 @@ U64 nodes = 0;
 
 void Board::logStats() {
 	if constexpr (collectTTStats) {
-		std::cout << "tt hits: " << ttHits << " collisions: " << ttCollisions << " empty: " << ttEmpty << std::endl;
+		// std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / tt->size()) << "‰" << std::endl;
+		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttCollisions + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / tt->size()) << "‰" << std::endl;
 		ttHits = 0;
 		ttCollisions = 0;
 		ttEmpty = 0;
@@ -196,36 +224,32 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	if constexpr (countNodes)
 		nodes++;
 	if (occupied == 0) {
-		if constexpr (!returnMove)
-			return { 0 };
-		else
-			return { .score = 0 };
+		return SearchReturn{ .score = 0 };
 	}
 
 	if (depth < movesLowerBound()) {
-		if constexpr (!returnMove)
-			return { std::numeric_limits<Score>::max() - MAX_MOVES };
-		else
-			return { .score = std::numeric_limits<Score>::max() - MAX_MOVES };
+		return SearchReturn{ .score = std::numeric_limits<Score>::max() - MAX_MOVES };
 	}
 
 	// TT lookup
 	// profiling: 45%
-	TTEntry* entry;
+	TTRow* entry;
 	if (depth > TT_DEPTH_LIMIT && !returnMove) {
 		auto hash = this->hash();
-		entry = &(*tt)[hash & (tt->size() - 1)];
+		entry = &(*tt)[hash % tt->size()];
 		if constexpr (collectTTStats) {
-			if (entry->board.occupied == 0)
+			if (entry->recent.board.occupied == 0)
 				ttEmpty++;
-			else if (entry->board == *this)
+			else if (entry->recent.board == *this)
 				ttHits++;
 			else
 				ttCollisions++;
 		}
 
-		if (entry->board == *this && entry->depth >= depth)
-			return { entry->score };
+		if (entry->recent.board == *this && entry->recent.depth >= depth)
+			return SearchReturn{ .score = entry->recent.score };
+		if (entry->deep.board == *this && entry->deep.depth >= depth)
+			return SearchReturn{ .score = entry->deep.score };
 	}
 
 	auto* newMovesBegin = newMoves;
@@ -249,17 +273,20 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 		}
 	}
 
-	if (depth > TT_DEPTH_LIMIT && (!entry->board.occupied || entry->depth < depth + 2))
-		*entry = {
+	if (depth > TT_DEPTH_LIMIT && !returnMove) {
+		entry->recent = {
 			.board = *this,
 			.depth = depth,
 			.score = best,
 		};
+		if (entry->deep.depth < depth)
+			entry->deep = entry->recent;
+	}
 
 	if constexpr (!returnMove)
 		return best;
 	else
-		return {
+		return SearchReturn{
 			.board = bestNextBoard,
 			.move = (types[0] ^ bestNextBoard.types[0]) | (types[1] ^ bestNextBoard.types[1]),
 			.score = best,
