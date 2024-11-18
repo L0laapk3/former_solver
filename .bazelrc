@@ -3,6 +3,7 @@ build:common --cxxopt='-std=c++20'
 build:common --copt=-fcolor-diagnostics
 build:common --cpu=local
 build:common --cxxopt='-march=native'
+build:common --cxxopt='-Wall' --cxxopt='-Werror' --cxxopt='-Wpedantic' --cxxopt='-Wno-unused-parameter' --cxxopt='-Wno-missing-braces' --cxxopt='-Wno-unused-variable' --cxxopt='-Wno-unused-but-set-variable' --cxxopt='-Wno-unused-function' --cxxopt='-Wno-unused-private-field' --cxxopt='-Wno-switch' --cxxopt='-Wno-language-extension-token'
 build --config=common
 
 build:opt --copt=-Ofast

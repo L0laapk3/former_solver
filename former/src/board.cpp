@@ -93,6 +93,26 @@ U64 Board::toColumnMask(U64 bits) {
 }
 
 
+U64 Board::stubbornMoves() const {
+	// cells that have the same color as the one above, plus not occupied cells. Top row removed then shifted 1
+	U64 connectedCells = ((~(((types[0] >> 1) ^ types[0]) | ((types[1] >> 1) ^ types[1])) | ~(occupied >> 1)) & ~MASK_TOP) << 1;
+
+	// select top contiguous block of cells in each column
+	U64 TopContiguousGroupLsb = (~connectedCells - MASK_TOP) ^ ~connectedCells; // find the first '0'
+	U64 TopContiguousGroup = (MASK_TOP << 1) - TopContiguousGroupLsb;           // fill in 1s from top to touch the first '0'
+
+	std::cout << toString() << std::endl;
+	std::cout << toBitString(occupied) << std::endl;
+	std::cout << toBitString(connectedCells >> 1) << std::endl;
+	std::cout << toBitString(~connectedCells) << std::endl;
+	std::cout << toBitString(MASK_TOP) << std::endl;
+	std::cout << toBitString((~connectedCells) - MASK_TOP) << std::endl;
+	std::cout << toBitString(TopContiguousGroupLsb) << std::endl;
+	std::cout << toBitString(TopContiguousGroup) << std::endl;
+
+	return 0;
+}
+
 U64 Board::partialOrderReductionMask(U64 move, Board& board) const {
 
 	// std::cout << "in:   " << toBitString(move) << std::endl;
@@ -184,6 +204,8 @@ void Board::logStats() {
 
 template<typename Callable>
 bool Board::generateMoves(U64 moveMask, Callable cb) const {
+	stubbornMoves();
+
 	U64 moves = occupied & moveMask;
 
 	U64 leftSame  = occupied & ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;

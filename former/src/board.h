@@ -46,6 +46,7 @@ struct Board {
 
 	Score movesLowerBound() const;
 
+	U64 stubbornMoves() const;
 	U64 partialOrderReductionMask(U64 move, Board& board) const;
 	template<typename Callable>
 	bool generateMoves(U64 moveMask, Callable cb) const;
