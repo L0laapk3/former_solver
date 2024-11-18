@@ -170,15 +170,13 @@ constexpr bool countNodes = false;
 constexpr bool collectTTStats = false;
 U64 ttHits = 0;
 U64 ttCollisions = 0;
-U64 ttEmpty = 0;
+U64 ttMisses = 0;
 U64 nodes = 0;
 
 void Board::logStats() {
 	if constexpr (collectTTStats) {
-		// std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / tt->size()) << "‰" << std::endl;
-		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttCollisions + ttEmpty + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttHits + 1)) << "‰) usage: " << std::round(ttEmpty * 1000 / 2 / tt->size()) << "‰ size: 2 * " << tt->size() << std::endl;
-		ttHits = 0;
-		ttCollisions = 0;
+		U64 ttUsed = ttMisses - ttCollisions;
+		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttMisses + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttMisses + 1)) << "‰) entries: " << ttUsed << " (" << std::round(ttUsed * 1000 / 2 / tt->size()) << "‰) size: 2 * " << tt->size() << std::endl;
 	}
 	if constexpr (countNodes)
 		std::cout << "nodes: " << nodes << std::endl;
@@ -234,8 +232,8 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 	return false;
 }
 
-template<bool returnMove>
-std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const {
+template<bool rootSearch>
+std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const {
 	if constexpr (countNodes)
 		nodes++;
 	if (occupied == 0) {
@@ -249,21 +247,21 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	// TT lookup
 	// profiling: 45%
 	TTRow* entry;
-	if (depth > TT_DEPTH_LIMIT && !returnMove) {
+	if (depth > TT_DEPTH_LIMIT && !rootSearch) {
 		entry = &(*tt)[hash % tt->size()];
-		if constexpr (collectTTStats) {
-			if (entry->recent.board.occupied == 0)
-				ttEmpty++;
-			else if (entry->recent.board == *this || entry->deep.board == *this)
-				ttHits++;
-			else
-				ttCollisions++;
-		}
 
-		if (entry->recent.board == *this && entry->recent.depth >= depth)
+		if (entry->recent.board == *this && entry->recent.depth >= depth) {
+			if constexpr (collectTTStats)
+				ttHits++;
 			return SearchReturn{ .score = entry->recent.score };
-		if (entry->deep.board == *this && entry->deep.depth >= depth)
+		}
+		if (entry->deep.board == *this && entry->deep.depth >= depth) {
+			if constexpr (collectTTStats)
+				ttHits++;
 			return SearchReturn{ .score = entry->deep.score };
+		}
+		if constexpr (collectTTStats)
+			ttMisses++;
 	}
 
 	auto* newMovesBegin = newMoves;
@@ -278,10 +276,8 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 		if (depth < board.movesLowerBound())
 			return false;
 
-		*newMoves = {
-			.board = board,
-			.moveMask = partialOrderReductionMask(move, board),
-		};
+		newMoves->board = board;
+		newMoves->moveMask = partialOrderReductionMask(move, board);
 		newMoves++;
 
 		return false;
@@ -303,19 +299,18 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	}
 
 
-	if (depth > TT_DEPTH_LIMIT && !returnMove) {
-		TTEntry newEntry{
+	if (depth > TT_DEPTH_LIMIT && !rootSearch) {
+		auto& replaceEntry = entry->deep.depth < depth ? entry->deep : entry->recent;
+		if (collectTTStats && replaceEntry.board.occupied)
+			ttCollisions++;
+		replaceEntry = {
 			.board = *this,
 			.depth = depth,
 			.score = best,
 		};
-		if (entry->deep.depth < depth)
-			entry->deep = newEntry;
-		else
-			entry->recent = newEntry;
 	}
 
-	if constexpr (!returnMove)
+	if constexpr (!rootSearch)
 		return best;
 	else
 		return SearchReturn{

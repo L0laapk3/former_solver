@@ -31,9 +31,10 @@ int main(int argc, char** argv) {
 			// time in milliseconds
 			std::chrono::duration<double> elapsed = end - start;
 			if (!foundSolution) {
-				if (elapsed.count() > 0.1)
+				if (elapsed.count() > 0.1) {
 					std::cout << "depth " << depth << ": " << std::round(elapsed.count() * 1000) << "ms" << std::endl;
-				Board::logStats();
+					Board::logStats();
+				}
 			}
 			if (result.score > depth) {
 				if (foundSolution)
