@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
 		SearchReturn result;
 		do {
 			auto start = std::chrono::high_resolution_clock::now();
-			result = board.search<true>(&newMoves[0], depth);
+			result = board.search<true>(&newMoves[0], depth, ~0ULL, board.hash(), board);
 			auto end = std::chrono::high_resolution_clock::now();
 			// time in milliseconds
 			std::chrono::duration<double> elapsed = end - start;

@@ -84,36 +84,65 @@ std::string Board::toMoveString(U64 move) {
 	return std::string(1, 'A' + x) + std::to_string(HEIGHT - y);
 }
 
-
+U64 Board::lsbCol(U64 bits) {
+	return bits & (~bits + MASK_BOTTOM);
+}
 U64 Board::toColumnMask(U64 bits) {
 	U64 addShit = (bits & ~MASK_TOP) + ~MASK_TOP;
 	U64 colLsb = ((addShit | bits) >> (HEIGHT - 1)) & MASK_BOTTOM;
-	// This multiplication could be replaced with a subtraction and some masking/oring?
-	return (colLsb & MASK_BOTTOM) * MASK_LEFT;
+	return (colLsb << HEIGHT) - colLsb;
 }
 
 
+U64 stubbornFakes = 0;
+U64 stubbornHits = 0;
+
+// still needs floodfill later to check if the move is "complete"
 U64 Board::stubbornMoves() const {
-	// cells that have the same color as the one above, plus not occupied cells. Top row removed then shifted 1
-	U64 connectedCells = ((~(((types[0] >> 1) ^ types[0]) | ((types[1] >> 1) ^ types[1])) | ~(occupied >> 1)) & ~MASK_TOP) << 1;
+	// cells that have the same color as the one above, plus not occupied cells.
+	U64 stubborn = ((~(((types[0] >> 1) ^ types[0]) | ((types[1] >> 1) ^ types[1])) | ~(occupied >> 1)) | MASK_TOP);
 
-	// select top contiguous block of cells in each column
-	U64 TopContiguousGroupLsb = (~connectedCells - MASK_TOP) ^ ~connectedCells; // find the first '0'
-	U64 TopContiguousGroup = (MASK_TOP << 1) - TopContiguousGroupLsb;           // fill in 1s from top to touch the first '0'
+	// wipe out lowest group until only the top one is left
+	for (size_t i = 0; i < 4; i++) {
+		U64 lsb = lsbCol(stubborn);
+		U64 lowestRemoved = stubborn & (stubborn + lsb);
+		U64 doRemoveMask = toColumnMask(lowestRemoved); // check if all the groups (aka the top one) have been removed
+		stubborn = (stubborn & ~doRemoveMask) | (lowestRemoved & doRemoveMask); // if so, theres only one group left, restore it
+	}
+	stubborn &= occupied;
 
-	std::cout << toString() << std::endl;
-	std::cout << toBitString(occupied) << std::endl;
-	std::cout << toBitString(connectedCells >> 1) << std::endl;
-	std::cout << toBitString(~connectedCells) << std::endl;
-	std::cout << toBitString(MASK_TOP) << std::endl;
-	std::cout << toBitString((~connectedCells) - MASK_TOP) << std::endl;
-	std::cout << toBitString(TopContiguousGroupLsb) << std::endl;
-	std::cout << toBitString(TopContiguousGroup) << std::endl;
+	std::array<U64, 2> stubbornTypes{ stubborn & types[0], stubborn & types[1] };
+	std::array<U64, 2> typeCols { toColumnMask(stubbornTypes[0]), toColumnMask(stubbornTypes[1]) };
 
-	return 0;
+	// if the neighboring columns are the same color, check if any cells connect
+	U64 connectsLeft = ~toColumnMask((stubbornTypes[0] ^ (stubbornTypes[0] >> HEIGHT)) | (stubbornTypes[1] ^ (stubbornTypes[1] >> HEIGHT)));
+	U64 sameStubbornColorLeft = ~((typeCols[0] ^ (typeCols[0] >> HEIGHT)) | (typeCols[1] ^ (typeCols[1] >> HEIGHT)));
+	U64 connectsOk = ~sameStubbornColorLeft | connectsLeft;
+	connectsOk &= connectsOk << HEIGHT;
+	stubborn &= connectsOk;
+
+	// check if the -1, 0, +1 columns have any of the same color remaining
+	U64 stubbornColorInSameColumn  =  ~stubborn            & ~((typeCols[0] ^  types[0]           ) | (typeCols[1] ^  types[1]           ));
+	U64 stubbornColorInLeftColumn  = (~stubborn << HEIGHT) & ~((typeCols[0] ^ (types[0] << HEIGHT)) | (typeCols[1] ^ (types[1] << HEIGHT)));
+	U64 stubbornColorInRightColumn = (~stubborn >> HEIGHT) & ~((typeCols[0] ^ (types[0] >> HEIGHT)) | (typeCols[1] ^ (types[1] >> HEIGHT)));
+	U64 stubbornCols = ~toColumnMask(stubbornColorInSameColumn | stubbornColorInLeftColumn | stubbornColorInRightColumn);
+
+	return stubborn & stubbornCols;
+
+	// if (stubbornCols & MASK_ANY) {
+	// 	std::cout << toString() << std::endl;
+	// 	std::cout << toBitString(occupied) << std::endl;
+	// 	std::cout << toBitString(stubborn) << std::endl;
+	// 	std::cout << toBitString(connectsOk) << std::endl;
+	// 	std::cout << toBitString(stubbornColorInRightColumn) << std::endl;
+	// 	std::cout << toBitString(stubbornColorInSameColumn) << std::endl;
+	// 	std::cout << toBitString(stubbornColorInLeftColumn) << std::endl;
+	// 	std::cout << toBitString(stubbornCols) << std::endl;
+	// 	std::cout << toBitString(stubborn & stubbornCols) << std::endl;
+	// }
 }
 
-U64 Board::partialOrderReductionMask(U64 move, Board& board) const {
+U64 Board::partialOrderReductionMask(U64 move) const {
 
 	// std::cout << "in:   " << toBitString(move) << std::endl;
 	// std::cout << "occ:  " << toBitString(occupied) << std::endl;
@@ -186,35 +215,36 @@ Score Board::movesLowerBound() const {
 	return std::popcount(counts);
 }
 
-constexpr bool countNodes = false;
-constexpr bool collectTTStats = false;
+
+constexpr bool USE_TT = true;
+constexpr bool COUNT_NODES = false;
+constexpr bool COUNT_TT_STATS = false;
 U64 ttHits = 0;
 U64 ttCollisions = 0;
 U64 ttMisses = 0;
 U64 nodes = 0;
 
 void Board::logStats() {
-	if constexpr (collectTTStats) {
+	if constexpr (COUNT_TT_STATS) {
 		U64 ttUsed = ttMisses - ttCollisions;
 		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttMisses + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttMisses + 1)) << "‰) entries: " << ttUsed << " (" << std::round(ttUsed * 1000 / 2 / tt->size()) << "‰) size: 2 * " << tt->size() << std::endl;
 	}
-	if constexpr (countNodes)
+	if constexpr (COUNT_NODES)
 		std::cout << "nodes: " << nodes << std::endl;
+	std::cout << "stubborn fakes: " << stubbornFakes << " hits: " << stubbornHits << std::endl;
 }
+
 
 template<typename Callable>
 bool Board::generateMoves(U64 moveMask, Callable cb) const {
-	stubbornMoves();
-
-	U64 moves = occupied & moveMask;
 
 	U64 leftSame  = occupied & ~((types[0] << HEIGHT) ^ types[0]) & ~((types[1] << HEIGHT) ^ types[1]) & ~MASK_LEFT;
 	U64 rightSame = occupied & ~((types[0] >> HEIGHT) ^ types[0]) & ~((types[1] >> HEIGHT) ^ types[1]) & ~MASK_RIGHT;
 	U64 upSame    = occupied & ~((types[0] << 1     ) ^ types[0]) & ~((types[1] << 1     ) ^ types[1]) & ~MASK_BOTTOM;
 	U64 downSame  =            ~((types[0] >> 1     ) ^ types[0]) & ~((types[1] >> 1     ) ^ types[1]) & ~MASK_TOP;
 
-	while (moves) {
-		U64 move = moves & -moves;
+	auto moveFromMoveBits = [&](U64& bits) -> U64 {
+		U64 move = bits & -bits;
 		U64 lastMove;
 		// profiling: 11%
 		do {
@@ -223,10 +253,35 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 				move |= ((move << HEIGHT) & leftSame) | ((move >> HEIGHT) & rightSame) | ((move << 1) & upSame) | ((move >> 1) & downSame);
 			}
 		} while (lastMove != move);
+		return move;
+	};
+
+
+	// U64 stubborn = stubbornMoves();
+	// while (stubborn) [[unlikely]] {
+	// 	// stubbornFakes++;
+	// 	U64 move = moveFromMoveBits(stubborn);
+	// 	bool isComplete = (move & stubborn) == move;
+	// 	stubborn &= ~move;
+	// 	if (!isComplete)
+	// 		continue;
+	// 	// stubbornFakes--;
+	// 	// stubbornHits++;
+
+	// 	// actually execute the stubborn move and exit
+	// 	Board board = *this;
+	// 	board.occupied &= ~move;
+	// 	return cb(board, move);
+	// }
+
+	U64 moves = occupied & moveMask;
+
+	while (moves) {
+		U64 move = moveFromMoveBits(moves);
+		moves &= ~move;
 
 		Board board = *this;
 		board.occupied &= ~move;
-		moves          &= ~move;
 
 		// std::cout << "before gravity" << std::endl;
 		// std::cout << newBoard.toString() << std::endl;
@@ -255,8 +310,8 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 }
 
 template<bool rootSearch>
-std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const {
-	if constexpr (countNodes)
+std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 move, U64 hash, const Board& prevBoard) const {
+	if constexpr (COUNT_NODES)
 		nodes++;
 	if (occupied == 0) {
 		return SearchReturn{ .score = 0 };
@@ -269,27 +324,27 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 	// TT lookup
 	// profiling: 45%
 	TTRow* entry;
-	if (depth > TT_DEPTH_LIMIT && !rootSearch) {
+	if (USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
 		entry = &(*tt)[hash % tt->size()];
 
 		if (entry->recent.board == *this && entry->recent.depth >= depth) {
-			if constexpr (collectTTStats)
+			if constexpr (COUNT_TT_STATS)
 				ttHits++;
 			return SearchReturn{ .score = entry->recent.score };
 		}
 		if (entry->deep.board == *this && entry->deep.depth >= depth) {
-			if constexpr (collectTTStats)
+			if constexpr (COUNT_TT_STATS)
 				ttHits++;
 			return SearchReturn{ .score = entry->deep.score };
 		}
-		if constexpr (collectTTStats)
+		if constexpr (COUNT_TT_STATS)
 			ttMisses++;
 	}
 
 	auto* newMovesBegin = newMoves;
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
-	if (!generateMoves(moveMask, [&](Board& board, U64 move) {
+	if (!generateMoves(prevBoard.partialOrderReductionMask(move), [&](Board& board, U64 move) {
 		if (board.occupied == 0) {
 			best = 1;
 			bestNextBoard = board;
@@ -299,18 +354,19 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 			return false;
 
 		newMoves->board = board;
-		newMoves->moveMask = partialOrderReductionMask(move, board);
+		newMoves->move = move;
 		newMoves++;
 
 		return false;
 	})) {
 		// recursive search
+		if (USE_TT && depth - 1 > TT_DEPTH_LIMIT)
+			for (auto it = newMovesBegin; it != newMoves; ++it) {
+				it->hash = it->board.hash();
+				__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
+			}
 		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			it->hash = it->board.hash();
-			__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
-		}
-		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask, it->hash) + 1;
+			auto score = it->board.search<false>(newMoves, depth - 1, it->move, it->hash, *this) + 1;
 			if (score < best) {
 				best = score;
 				bestNextBoard = it->board;
@@ -321,9 +377,9 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 	}
 
 
-	if (depth > TT_DEPTH_LIMIT && !rootSearch) {
+	if (USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
 		auto& replaceEntry = entry->deep.depth < depth ? entry->deep : entry->recent;
-		if (collectTTStats && replaceEntry.board.occupied)
+		if (COUNT_TT_STATS && replaceEntry.board.occupied)
 			ttCollisions++;
 		replaceEntry = {
 			.board = *this,
@@ -342,5 +398,5 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 		};
 }
 
-template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask, U64 hash) const;
-template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const;
+template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard) const;
+template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard) const;

@@ -5,6 +5,7 @@
 #include <string>
 #include <span>
 #include <iterator>
+#include <limits>
 #include <memory>
 
 #include "types.h"
@@ -39,6 +40,7 @@ struct Board {
 	static std::string toBitString(U64 bits);
 	static std::string toMoveString(U64 move);
 
+	static U64 lsbCol(U64 bits);
 	static U64 toColumnMask(U64 bits);
 
 	U64 hash() const;
@@ -47,12 +49,12 @@ struct Board {
 	Score movesLowerBound() const;
 
 	U64 stubbornMoves() const;
-	U64 partialOrderReductionMask(U64 move, Board& board) const;
+	U64 partialOrderReductionMask(U64 move) const;
 	template<typename Callable>
 	bool generateMoves(U64 moveMask, Callable cb) const;
 
 	template<bool rootSearch>
-	std::conditional_t<rootSearch, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask = ~0ULL, U64 hash = 0ULL) const;
+	std::conditional_t<rootSearch, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard) const;
 };
 
 struct alignas(32) TTEntry {
@@ -79,6 +81,6 @@ struct SearchReturn {
 
 struct Move {
 	Board board;
-	U64 moveMask;
+	U64 move;
 	U64 hash;
 };
