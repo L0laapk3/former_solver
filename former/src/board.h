@@ -51,7 +51,7 @@ struct Board {
 	bool generateMoves(U64 moveMask, Callable cb) const;
 
 	template<bool returnMove>
-	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask = ~0ULL) const;
+	std::conditional_t<returnMove, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask = ~0ULL, U64 hash = 0ULL) const;
 };
 
 struct alignas(32) TTEntry {
@@ -79,4 +79,5 @@ struct SearchReturn {
 struct Move {
 	Board board;
 	U64 moveMask;
+	U64 hash;
 };

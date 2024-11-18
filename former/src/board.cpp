@@ -235,7 +235,7 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 }
 
 template<bool returnMove>
-std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask) const {
+std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const {
 	if constexpr (countNodes)
 		nodes++;
 	if (occupied == 0) {
@@ -250,7 +250,6 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	// profiling: 45%
 	TTRow* entry;
 	if (depth > TT_DEPTH_LIMIT && !returnMove) {
-		auto hash = this->hash();
 		entry = &(*tt)[hash % tt->size()];
 		if constexpr (collectTTStats) {
 			if (entry->recent.board.occupied == 0)
@@ -289,11 +288,11 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 	})) {
 		// recursive search
 		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			auto hash = it->board.hash();
-			__builtin_prefetch(&(*tt)[hash % tt->size()]);
+			it->hash = it->board.hash();
+			__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
 		}
 		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask) + 1;
+			auto score = it->board.search<false>(newMoves, depth - 1, it->moveMask, it->hash) + 1;
 			if (score < best) {
 				best = score;
 				bestNextBoard = it->board;
@@ -326,5 +325,5 @@ std::conditional_t<returnMove, SearchReturn, Score> Board::search(Move* newMoves
 		};
 }
 
-template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask) const;
-template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask) const;
+template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask, U64 hash) const;
+template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask, U64 hash) const;
