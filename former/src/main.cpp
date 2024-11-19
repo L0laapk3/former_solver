@@ -12,7 +12,8 @@ std::vector<Move> newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
 
 int main(int argc, char** argv) {
 	// auto board =	Board::fromString("PGGOGPG GOBBPBG BOOGPBG BPOOBOG GGGBBOO GBGGOPO PGOOGPG OGPPPGO OOGPOOO"); // 17/11/2024
-	auto board =	Board::fromString("GGGBOBB OBGPBPP BBOBOOB GPBGOBB OBBOPBO OBBOGBO BGOBOPG GOGPOGO OGGOGGO"); // 18/11/2024
+	// auto board =	Board::fromString("GGGBOBB OBGPBPP BBOBOOB GPBGOBB OBBOPBO OBBOGBO BGOBOPG GOGPOGO OGGOGGO"); // 18/11/2024
+	auto board =	Board::fromString("GGBOGPB OPPOGGB PGPGPPO GBPOOGP OBGBOBP PGPGOOG GGGGGPO OPGPBBO BOGPOBP"); // 19/11/2024
 	std::cout << board.toString() << std::endl;
 
 	auto startTotal = std::chrono::high_resolution_clock::now();
@@ -31,10 +32,10 @@ int main(int argc, char** argv) {
 			// time in milliseconds
 			std::chrono::duration<double> elapsed = end - start;
 			if (!foundSolution) {
-				if (elapsed.count() > 0.1) {
+				// if (elapsed.count() > 0.1) {
 					std::cout << "depth " << depth << ": " << std::round(elapsed.count() * 1000) << "ms" << std::endl;
 					Board::logStats();
-				}
+				// }
 			}
 			if (result.score > depth) {
 				if (foundSolution)

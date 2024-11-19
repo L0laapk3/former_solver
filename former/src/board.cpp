@@ -9,6 +9,7 @@
 #include <bit>
 #include <algorithm>
 #include <limits>
+#include "xoshiro256.h"
 
 
 
@@ -170,31 +171,21 @@ U64 Board::partialOrderReductionMask(U64 move) const {
 	return result;
 }
 
-U64 Board::hash() const {
-	U64 hash = 0;
-	hash ^= types[0];
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= types[0] >> 21;
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= types[0] >> 42;
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= types[1];
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= types[1] >> 21;
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= types[1] >> 42;
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= occupied;
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= occupied >> 21;
-	hash *= 0x9e3779b97f4a7c15;
-	hash ^= occupied >> 42;
-	return hash;
 
-	U64 hash1 = ((U128)types[0] * 12769894017520768087ULL) >> 64;
-	U64 hash2 = ((U128)types[1] * 14976091711589288359ULL) >> 64;
-	U64 hash3 = ((U128)occupied * 9292276211755231913ULL) >> 64;
-	return std::hash<U64>{}(hash1 ^ hash2 ^ hash3);
+U64 MurmurHash3(U64 key) {
+    key ^= key >> 33;
+    key *= 0xff51afd7ed558ccdULL;
+    key ^= key >> 33;
+    key *= 0xc4ceb9fe1a85ec53ULL;
+    key ^= key >> 33;
+    return key;
+}
+U64 Board::hash() const {
+    U64 hash = 0;
+    hash ^= MurmurHash3(types[0]);
+    hash ^= MurmurHash3(types[1]);
+    hash ^= MurmurHash3(occupied);
+    return hash;
 }
 
 
@@ -216,22 +207,23 @@ Score Board::movesLowerBound() const {
 }
 
 
-constexpr bool USE_TT = true;
 constexpr bool COUNT_NODES = false;
 constexpr bool COUNT_TT_STATS = false;
 U64 ttHits = 0;
-U64 ttCollisions = 0;
+U64 ttEntries = 0;
 U64 ttMisses = 0;
+U64 ttCollisions = 0;
 U64 nodes = 0;
 
+U64 lastEntries = 0;
 void Board::logStats() {
 	if constexpr (COUNT_TT_STATS) {
-		U64 ttUsed = ttMisses - ttCollisions;
-		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttMisses + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttMisses + 1)) << "‰) entries: " << ttUsed << " (" << std::round(ttUsed * 1000 / 2 / tt->size()) << "‰) size: 2 * " << tt->size() << std::endl;
+		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttMisses + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttMisses + 1)) << "‰) entries: " << ttEntries << " (" << std::round(ttEntries * 1000 / 2 / tt->size()) << "‰) size: 2 * " << tt->size() << std::endl;
+		lastEntries = ttEntries;
 	}
 	if constexpr (COUNT_NODES)
 		std::cout << "nodes: " << nodes << std::endl;
-	std::cout << "stubborn fakes: " << stubbornFakes << " hits: " << stubbornHits << std::endl;
+	// std::cout << "stubborn fakes: " << stubbornFakes << " hits: " << stubbornHits << std::endl;
 }
 
 
@@ -379,8 +371,12 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 
 	if (USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
 		auto& replaceEntry = entry->deep.depth < depth ? entry->deep : entry->recent;
-		if (COUNT_TT_STATS && replaceEntry.board.occupied)
-			ttCollisions++;
+		if constexpr (COUNT_TT_STATS) {
+			if (!replaceEntry.board.occupied)
+				ttEntries++;
+			if (replaceEntry.board.occupied && replaceEntry.board != *this)
+				ttCollisions++;
+		}
 		replaceEntry = {
 			.board = *this,
 			.depth = depth,

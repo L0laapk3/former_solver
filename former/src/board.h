@@ -67,6 +67,7 @@ struct alignas(64) TTRow {
 	TTEntry recent;
 };
 
+constexpr bool USE_TT = true;
 constexpr U64 TT_DEPTH_LIMIT = 0;
 typedef std::array<TTRow, 32ULL * 1024 * 1024 * 1024 / 8 / sizeof(TTRow)> TT;
 extern std::unique_ptr<TT> tt;
