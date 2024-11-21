@@ -454,7 +454,7 @@ SearchReturn Board::searchMT(Depth depth, Depth mtDepth) const {
 	auto newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
 	search<true, MULTITHREAD_START>(newMoves.data(), depth, ~0ULL, hash(), *this, mtDepth);
 
-	std::cout << "searching " << mtJobs.size() << " chunks" << std::endl;
+	// std::cout << "searching " << mtJobs.size() << " chunks" << std::endl;
 
 	std::atomic_thread_fence(std::memory_order_release);
 	std::atomic<U64> chunkCounter = 0;
