@@ -9,6 +9,10 @@
 #include <bit>
 #include <algorithm>
 #include <limits>
+#include <atomic>
+#include <queue>
+#include <thread>
+#include <vector>
 #include "xoshiro256.h"
 
 
@@ -249,22 +253,22 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 	};
 
 
-	// U64 stubborn = stubbornMoves();
-	// while (stubborn) [[unlikely]] {
-	// 	// stubbornFakes++;
-	// 	U64 move = moveFromMoveBits(stubborn);
-	// 	bool isComplete = (move & stubborn) == move;
-	// 	stubborn &= ~move;
-	// 	if (!isComplete)
-	// 		continue;
-	// 	// stubbornFakes--;
-	// 	// stubbornHits++;
+	U64 stubborn = stubbornMoves();
+	while (stubborn) [[unlikely]] {
+		// stubbornFakes++;
+		U64 move = moveFromMoveBits(stubborn);
+		bool isComplete = (move & stubborn) == move;
+		stubborn &= ~move;
+		if (!isComplete)
+			continue;
+		// stubbornFakes--;
+		// stubbornHits++;
 
-	// 	// actually execute the stubborn move and exit
-	// 	Board board = *this;
-	// 	board.occupied &= ~move;
-	// 	return cb(board, move);
-	// }
+		// actually execute the stubborn move and exit
+		Board board = *this;
+		board.occupied &= ~move;
+		return cb(board, move);
+	}
 
 	U64 moves = occupied & moveMask;
 
@@ -301,8 +305,19 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 	return false;
 }
 
-template<bool rootSearch>
-std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 move, U64 hash, const Board& prevBoard) const {
+
+struct MTJob {
+	Board board;
+	U64 move;
+	Board prevBoard;
+	Score score;
+};
+
+std::deque<MTJob> mtJobs{};
+
+
+template<bool rootSearch, Board::MultithreadMode MT>
+std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 move, U64 hash, const Board& prevBoard, Depth mtDepth) const {
 	if constexpr (COUNT_NODES)
 		nodes++;
 	if (occupied == 0) {
@@ -316,18 +331,21 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 	// TT lookup
 	// profiling: 45%
 	TTRow* entry;
-	if (USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
+	if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
 		entry = &(*tt)[hash % tt->size()];
 
-		if (entry->recent.board == *this && entry->recent.depth >= depth) {
+		// not sure if this is okay, but its 1 RAM row so fuck it
+		TTRow entryCopy = *entry;
+
+		if (entryCopy.recent.board == *this && entryCopy.recent.depth >= depth) {
 			if constexpr (COUNT_TT_STATS)
 				ttHits++;
-			return SearchReturn{ .score = entry->recent.score };
+			return SearchReturn{ .score = entryCopy.recent.score };
 		}
-		if (entry->deep.board == *this && entry->deep.depth >= depth) {
+		if (entryCopy.deep.board == *this && entryCopy.deep.depth >= depth) {
 			if constexpr (COUNT_TT_STATS)
 				ttHits++;
-			return SearchReturn{ .score = entry->deep.score };
+			return SearchReturn{ .score = entryCopy.deep.score };
 		}
 		if constexpr (COUNT_TT_STATS)
 			ttMisses++;
@@ -336,7 +354,23 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 	auto* newMovesBegin = newMoves;
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
-	if (!generateMoves(prevBoard.partialOrderReductionMask(move), [&](Board& board, U64 move) {
+
+	if (MT != NO_MULTITHREAD && mtDepth == 0) {
+		if (MT == MULTITHREAD_START)
+			mtJobs.emplace_back(MTJob{
+				.board = *this,
+				.move = move,
+				.prevBoard = prevBoard,
+				.score = best,
+			});
+		else {
+			auto& job = mtJobs.front();
+			if (job.board != *this)
+				throw std::runtime_error("MT job board mismatch");
+			best = job.score;
+			mtJobs.pop_front();
+		}
+	} else if (!generateMoves(prevBoard.partialOrderReductionMask(move), [&](Board& board, U64 move) {
 		if (board.occupied == 0) {
 			best = 1;
 			bestNextBoard = board;
@@ -352,13 +386,13 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 		return false;
 	})) {
 		// recursive search
-		if (USE_TT && depth - 1 > TT_DEPTH_LIMIT)
+		if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT + 1)
 			for (auto it = newMovesBegin; it != newMoves; ++it) {
 				it->hash = it->board.hash();
 				__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
 			}
 		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			auto score = it->board.search<false>(newMoves, depth - 1, it->move, it->hash, *this) + 1;
+			auto score = it->board.search<false, MT>(newMoves, depth - 1, it->move, it->hash, *this, mtDepth - 1) + 1;
 			if (score < best) {
 				best = score;
 				bestNextBoard = it->board;
@@ -369,7 +403,7 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 	}
 
 
-	if (USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
+	if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
 		auto& replaceEntry = entry->deep.depth < depth ? entry->deep : entry->recent;
 		if constexpr (COUNT_TT_STATS) {
 			if (!replaceEntry.board.occupied)
@@ -377,11 +411,15 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 			if (replaceEntry.board.occupied && replaceEntry.board != *this)
 				ttCollisions++;
 		}
-		replaceEntry = {
-			.board = *this,
-			.depth = depth,
-			.score = best,
-		};
+		U64 expected = ~0ULL;
+		if (!std::atomic_ref(replaceEntry.board.occupied).compare_exchange_strong(expected, ~0ULL)) {
+			std::atomic_thread_fence(std::memory_order_acquire);
+			replaceEntry.board.types = types;
+			replaceEntry.depth = depth;
+			replaceEntry.score = best;
+			std::atomic_thread_fence(std::memory_order_release);
+			std::atomic_ref(replaceEntry.board.occupied).store(occupied);
+		}
 	}
 
 	if constexpr (!rootSearch)
@@ -394,5 +432,39 @@ std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves
 		};
 }
 
-template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard) const;
-template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard) const;
+template SearchReturn Board::search<true> (Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard, Depth mtDepth) const;
+template Score        Board::search<false>(Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard, Depth mtDepth) const;
+
+
+
+void searchThread(std::atomic<U64>& chunkCounter, Depth depth) {
+	while (true) {
+		auto chunk = chunkCounter.fetch_add(1);
+		if (chunk >= mtJobs.size())
+			break;
+		auto& job = mtJobs[chunk];
+		auto newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
+		job.score = job.board.search<false, Board::NO_MULTITHREAD>(newMoves.data(), depth, job.move, job.board.hash(), job.prevBoard, 0);
+	}
+}
+
+SearchReturn Board::searchMT(Depth depth, Depth mtDepth) const {
+	mtJobs.clear();
+
+	auto newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
+	search<true, MULTITHREAD_START>(newMoves.data(), depth, ~0ULL, hash(), *this, mtDepth);
+
+	std::cout << "searching " << mtJobs.size() << " chunks" << std::endl;
+
+	std::atomic_thread_fence(std::memory_order_release);
+	std::atomic<U64> chunkCounter = 0;
+	std::vector<std::thread> threads(std::thread::hardware_concurrency());
+	for (int i = 0; i < threads.size(); i++)
+		threads[i] = std::thread(&searchThread, std::ref(chunkCounter), depth - mtDepth);
+
+	for (auto& thread : threads)
+		thread.join();
+	std::atomic_thread_fence(std::memory_order_acquire);
+
+	return search<true, MULTITHREAD_END>(newMoves.data(), depth, ~0ULL, hash(), *this, mtDepth);
+}

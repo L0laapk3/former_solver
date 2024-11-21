@@ -6,40 +6,40 @@
 #include <chrono>
 
 
-std::vector<Move> newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
-
 
 
 int main(int argc, char** argv) {
 	// auto board =	Board::fromString("PGGOGPG GOBBPBG BOOGPBG BPOOBOG GGGBBOO GBGGOPO PGOOGPG OGPPPGO OOGPOOO"); // 17/11/2024
 	// auto board =	Board::fromString("GGGBOBB OBGPBPP BBOBOOB GPBGOBB OBBOPBO OBBOGBO BGOBOPG GOGPOGO OGGOGGO"); // 18/11/2024
-	auto board =	Board::fromString("GGBOGPB OPPOGGB PGPGPPO GBPOOGP OBGBOBP PGPGOOG GGGGGPO OPGPBBO BOGPOBP"); // 19/11/2024
+	// auto board =	Board::fromString("GGBOGPB OPPOGGB PGPGPPO GBPOOGP OBGBOBP PGPGOOG GGGGGPO OPGPBBO BOGPOBP"); // 19/11/2024
+	// auto board =	Board::fromString("BBGBBPP GGGOOBG OGPGGPO PBBOOBG BOOGPBG BOBGOBG GGOBGPG GPBBOOO GBBOPGO"); // 20/11/2024
+	auto board =	Board::fromString("OOOOBPO PGGGBGO GOOPBOB PBPBBBP GOGOPOO BPPBGOP BOPGGPB GGBOGPP OPGBOPO"); // 21/11/2024
 	std::cout << board.toString() << std::endl;
 
 	auto startTotal = std::chrono::high_resolution_clock::now();
 
 
 	tt = std::make_unique<TT>();
-	U64 maxDepth, depth = 1;
+	U64 maxDepth, depth = 6;
 	bool foundSolution = false;
 	std::string solution = "";
 	while (board.occupied) {
 		SearchReturn result;
 		do {
 			auto start = std::chrono::high_resolution_clock::now();
-			result = board.search<true>(&newMoves[0], depth, ~0ULL, board.hash(), board);
+			result = board.searchMT(depth, 3);
 			auto end = std::chrono::high_resolution_clock::now();
 			// time in milliseconds
 			std::chrono::duration<double> elapsed = end - start;
 			if (!foundSolution) {
-				// if (elapsed.count() > 0.1) {
+				if (elapsed.count() > 0.1 || true) {
 					std::cout << "depth " << depth << ": " << std::round(elapsed.count() * 1000) << "ms" << std::endl;
 					Board::logStats();
-				// }
+				}
 			}
 			if (result.score > depth) {
 				if (foundSolution)
-					throw std::runtime_error("Solution lost..");
+					throw std::runtime_error("Shits fucked");
 				depth++;
 				// break;
 			} else {

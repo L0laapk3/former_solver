@@ -53,8 +53,15 @@ struct Board {
 	template<typename Callable>
 	bool generateMoves(U64 moveMask, Callable cb) const;
 
-	template<bool rootSearch>
-	std::conditional_t<rootSearch, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard) const;
+	enum MultithreadMode {
+		NO_MULTITHREAD,
+		MULTITHREAD_START,
+		MULTITHREAD_END,
+	};
+
+	template<bool rootSearch, MultithreadMode MT = NO_MULTITHREAD>
+	std::conditional_t<rootSearch, SearchReturn, Score> search(Move* newMoves, Depth depth, U64 moveMask, U64 hash, const Board& prevBoard, Depth mtDepth = 0) const;
+	SearchReturn searchMT(Depth depth, Depth mtDepth) const;
 };
 
 struct alignas(32) TTEntry {
