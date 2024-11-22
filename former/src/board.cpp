@@ -211,7 +211,7 @@ Score Board::movesLowerBound() const {
 }
 
 
-constexpr bool COUNT_NODES = false;
+constexpr bool COUNT_NODES = true;
 constexpr bool COUNT_TT_STATS = false;
 U64 ttHits = 0;
 U64 ttEntries = 0;
@@ -220,7 +220,7 @@ U64 ttCollisions = 0;
 U64 nodes = 0;
 
 U64 lastEntries = 0;
-void Board::logStats() {
+U64 Board::logStats() {
 	if constexpr (COUNT_TT_STATS) {
 		std::cout << "tt hits: " << ttHits << " (" << std::round(ttHits * 1000 / (ttHits + ttMisses + 1)) << "‰) collisions: " << ttCollisions << " (" << std::round(ttCollisions * 1000 / (ttMisses + 1)) << "‰) entries: " << ttEntries << " (" << std::round(ttEntries * 1000 / 2 / tt->size()) << "‰) size: 2 * " << tt->size() << std::endl;
 		lastEntries = ttEntries;
@@ -228,6 +228,7 @@ void Board::logStats() {
 	if constexpr (COUNT_NODES)
 		std::cout << "nodes: " << nodes << std::endl;
 	// std::cout << "stubborn fakes: " << stubbornFakes << " hits: " << stubbornHits << std::endl;
+	return nodes;
 }
 
 
@@ -253,24 +254,24 @@ bool Board::generateMoves(U64 moveMask, Callable cb) const {
 	};
 
 
-	U64 stubborn = stubbornMoves();
-	while (stubborn) [[unlikely]] {
-		// stubbornFakes++;
-		U64 move = moveFromMoveBits(stubborn);
-		bool isComplete = (move & stubborn) == move;
-		stubborn &= ~move;
-		if (!isComplete)
-			continue;
-		// stubbornFakes--;
-		// stubbornHits++;
+	// U64 stubborn = stubbornMoves();
+	// while (stubborn) [[unlikely]] {
+	// 	// stubbornFakes++;
+	// 	U64 move = moveFromMoveBits(stubborn);
+	// 	bool isComplete = (move & stubborn) == move;
+	// 	stubborn &= ~move;
+	// 	if (!isComplete)
+	// 		continue;
+	// 	// stubbornFakes--;
+	// 	// stubbornHits++;
 
-		// actually execute the stubborn move and exit
-		Board board = *this;
-		board.occupied &= ~move;
-		return cb(board, move);
-	}
+	// 	// actually execute the stubborn move and exit
+	// 	Board board = *this;
+	// 	board.occupied &= ~move;
+	// 	return cb(board, move);
+	// }
 
-	U64 moves = occupied & moveMask;
+	U64 moves = occupied;
 
 	while (moves) {
 		U64 move = moveFromMoveBits(moves);
@@ -320,107 +321,89 @@ template<bool rootSearch, Board::MultithreadMode MT>
 std::conditional_t<rootSearch, SearchReturn, Score> Board::search(Move* newMoves, Depth depth, U64 move, U64 hash, const Board& prevBoard, Depth mtDepth) const {
 	if constexpr (COUNT_NODES)
 		nodes++;
-	if (occupied == 0) {
+	if (depth == 0) {
 		return SearchReturn{ .score = 0 };
 	}
 
-	if (depth < movesLowerBound()) {
-		return SearchReturn{ .score = std::numeric_limits<Score>::max() - MAX_MOVES };
-	}
+	// // TT lookup
+	// // profiling: 45%
+	// TTRow* entry;
+	// if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
+	// 	entry = &(*tt)[hash % tt->size()];
 
-	// TT lookup
-	// profiling: 45%
-	TTRow* entry;
-	if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
-		entry = &(*tt)[hash % tt->size()];
+	// 	// not sure if this is okay, but its 1 RAM row so fuck it
+	// 	TTRow entryCopy = *entry;
 
-		// not sure if this is okay, but its 1 RAM row so fuck it
-		TTRow entryCopy = *entry;
-
-		if (entryCopy.recent.board == *this && entryCopy.recent.depth >= depth) {
-			if constexpr (COUNT_TT_STATS)
-				ttHits++;
-			return SearchReturn{ .score = entryCopy.recent.score };
-		}
-		if (entryCopy.deep.board == *this && entryCopy.deep.depth >= depth) {
-			if constexpr (COUNT_TT_STATS)
-				ttHits++;
-			return SearchReturn{ .score = entryCopy.deep.score };
-		}
-		if constexpr (COUNT_TT_STATS)
-			ttMisses++;
-	}
+	// 	if (entryCopy.recent.board == *this && entryCopy.recent.depth >= depth) {
+	// 		if constexpr (COUNT_TT_STATS)
+	// 			ttHits++;
+	// 		return SearchReturn{ .score = entryCopy.recent.score };
+	// 	}
+	// 	if (entryCopy.deep.board == *this && entryCopy.deep.depth >= depth) {
+	// 		if constexpr (COUNT_TT_STATS)
+	// 			ttHits++;
+	// 		return SearchReturn{ .score = entryCopy.deep.score };
+	// 	}
+	// 	if constexpr (COUNT_TT_STATS)
+	// 		ttMisses++;
+	// }
 
 	auto* newMovesBegin = newMoves;
 	Score best = std::numeric_limits<Score>::max() - MAX_MOVES;
 	Board bestNextBoard;
 
-	if (MT != NO_MULTITHREAD && mtDepth == 0) {
-		if (MT == MULTITHREAD_START)
-			mtJobs.emplace_back(MTJob{
-				.board = *this,
-				.move = move,
-				.prevBoard = prevBoard,
-				.score = best,
-			});
-		else {
-			auto& job = mtJobs.front();
-			if (job.board != *this)
-				throw std::runtime_error("MT job board mismatch");
-			best = job.score;
-			mtJobs.pop_front();
-		}
-	} else if (!generateMoves(prevBoard.partialOrderReductionMask(move), [&](Board& board, U64 move) {
-		if (board.occupied == 0) {
-			best = 1;
-			bestNextBoard = board;
-			return true;
-		}
-		if (depth < board.movesLowerBound())
-			return false;
+	if (!generateMoves(~0ULL, [&](Board& board, U64 move) {
+		// if (board.occupied == 0) {
+		// 	best = 1;
+		// 	bestNextBoard = board;
+		// 	return true;
+		// }
+		// if (depth < board.movesLowerBound())
+		// 	return false;
 
-		newMoves->board = board;
-		newMoves->move = move;
-		newMoves++;
+		auto score = board.search<false, MT>(newMoves, depth - 1, move, 0, *this, mtDepth - 1) + 1;
+
+		// newMoves->board = board;
+		// // newMoves->move = move;
+		// newMoves++;
 
 		return false;
 	})) {
 		// recursive search
-		if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT + 1)
-			for (auto it = newMovesBegin; it != newMoves; ++it) {
-				it->hash = it->board.hash();
-				__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
-			}
-		for (auto it = newMovesBegin; it != newMoves; ++it) {
-			auto score = it->board.search<false, MT>(newMoves, depth - 1, it->move, it->hash, *this, mtDepth - 1) + 1;
-			if (score < best) {
-				best = score;
-				bestNextBoard = it->board;
-				if (score <= depth)
-					break;
-			}
-		}
+		// if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT + 1)
+		// 	for (auto it = newMovesBegin; it != newMoves; ++it) {
+		// 		it->hash = it->board.hash();
+		// 		__builtin_prefetch(&(*tt)[it->hash % tt->size()]);
+		// 	}
+		// for (auto it = newMovesBegin; it != newMoves; ++it) {
+		// 	// if (score < best) {
+		// 	// 	best = score;
+		// 	// 	bestNextBoard = it->board;
+		// 	// 	if (score <= depth)
+		// 	// 		break;
+		// 	// }
+		// }
 	}
 
 
-	if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
-		auto& replaceEntry = entry->deep.depth < depth ? entry->deep : entry->recent;
-		if constexpr (COUNT_TT_STATS) {
-			if (!replaceEntry.board.occupied)
-				ttEntries++;
-			if (replaceEntry.board.occupied && replaceEntry.board != *this)
-				ttCollisions++;
-		}
-		U64 expected = ~0ULL;
-		if (!std::atomic_ref(replaceEntry.board.occupied).compare_exchange_strong(expected, ~0ULL)) {
-			std::atomic_thread_fence(std::memory_order_acquire);
-			replaceEntry.board.types = types;
-			replaceEntry.depth = depth;
-			replaceEntry.score = best;
-			std::atomic_thread_fence(std::memory_order_release);
-			std::atomic_ref(replaceEntry.board.occupied).store(occupied);
-		}
-	}
+	// if (MT == NO_MULTITHREAD && USE_TT && depth > TT_DEPTH_LIMIT && !rootSearch) {
+	// 	auto& replaceEntry = entry->deep.depth < depth ? entry->deep : entry->recent;
+	// 	if constexpr (COUNT_TT_STATS) {
+	// 		if (!replaceEntry.board.occupied)
+	// 			ttEntries++;
+	// 		if (replaceEntry.board.occupied && replaceEntry.board != *this)
+	// 			ttCollisions++;
+	// 	}
+	// 	U64 expected = ~0ULL;
+	// 	if (!std::atomic_ref(replaceEntry.board.occupied).compare_exchange_strong(expected, ~0ULL)) {
+	// 		std::atomic_thread_fence(std::memory_order_acquire);
+	// 		replaceEntry.board.types = types;
+	// 		replaceEntry.depth = depth;
+	// 		replaceEntry.score = best;
+	// 		std::atomic_thread_fence(std::memory_order_release);
+	// 		std::atomic_ref(replaceEntry.board.occupied).store(occupied);
+	// 	}
+	// }
 
 	if constexpr (!rootSearch)
 		return best;

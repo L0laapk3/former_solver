@@ -13,11 +13,23 @@ int main(int argc, char** argv) {
 	// auto board =	Board::fromString("GGGBOBB OBGPBPP BBOBOOB GPBGOBB OBBOPBO OBBOGBO BGOBOPG GOGPOGO OGGOGGO"); // 18/11/2024
 	// auto board =	Board::fromString("GGBOGPB OPPOGGB PGPGPPO GBPOOGP OBGBOBP PGPGOOG GGGGGPO OPGPBBO BOGPOBP"); // 19/11/2024
 	// auto board =	Board::fromString("BBGBBPP GGGOOBG OGPGGPO PBBOOBG BOOGPBG BOBGOBG GGOBGPG GPBBOOO GBBOPGO"); // 20/11/2024
-	// auto board =	Board::fromString("OOOOBPO PGGGBGO GOOPBOB PBPBBBP GOGOPOO BPPBGOP BOPGGPB GGBOGPP OPGBOPO"); // 21/11/2024
-	auto board =	Board::fromString("BPBGOGO OOPOPGB POPOOGO PBPPGPO PBOBOPB BBOPOBB BOBPPOB POPPPBG OOGPGOG"); // 22/11/2024
+	auto board =	Board::fromString("OOOOBPO PGGGBGO GOOPBOB PBPBBBP GOGOPOO BPPBGOP BOPGGPB GGBOGPP OPGBOPO"); // 21/11/2024
+	// auto board =	Board::fromString("BPBGOGO OOPOPGB POPOOGO PBPPGPO PBOBOPB BBOPOBB BOBPPOB POPPPBG OOGPGOG"); // 22/11/2024
 	std::cout << board.toString() << std::endl;
 
 	auto startTotal = std::chrono::high_resolution_clock::now();
+
+
+	if (1) { // perft
+		auto newMoves = std::vector<Move>(Board::MAX_MOVES * Board::SIZE);
+		auto start = std::chrono::high_resolution_clock::now();
+		board.search<false, Board::NO_MULTITHREAD>(newMoves.data(), 6, ~0ULL, 0, board, 0);
+		auto end = std::chrono::high_resolution_clock::now();
+		U64 nodes = Board::logStats();
+		std::chrono::duration<double> elapsed = end - start;
+		std::cout << "perft: " << nodes / elapsed.count() / 1000000 << "M/s" << std::endl;
+		exit(0);
+	}
 
 
 	tt = std::make_unique<TT>();

@@ -44,7 +44,7 @@ struct Board {
 	static U64 toColumnMask(U64 bits);
 
 	U64 hash() const;
-	static void logStats();
+	static U64 logStats();
 
 	Score movesLowerBound() const;
 
